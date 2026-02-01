@@ -3,19 +3,17 @@ set -euo pipefail
 
 : "${STREAM_KEY:?STREAM_KEY missing}"
 
-# ======= SETTINGS =======
-FPS="${FPS:-20}"
-W="${W:-854}"
-H="${H:-480}"
+# ======= TUNING =======
+export FPS="${FPS:-20}"
+export W="${W:-854}"
+export H="${H:-480}"
 
-BALLS="${BALLS:-200}"
-BALL_R="${BALL_R:-10}"
-RING_R="${RING_R:-160}"
-HOLE_DEG="${HOLE_DEG:-70}"
-SPIN="${SPIN:-0.9}"
-SPEED="${SPEED:-90}"
-
-export FPS W H BALLS BALL_R RING_R HOLE_DEG SPIN SPEED
+export BALLS="${BALLS:-200}"
+export BALL_R="${BALL_R:-10}"
+export RING_R="${RING_R:-160}"
+export HOLE_DEG="${HOLE_DEG:-70}"
+export SPIN="${SPIN:-0.9}"
+export SPEED="${SPEED:-90}"
 
 echo "=== GAME SETTINGS ==="
 echo "FPS=$FPS SIZE=${W}x${H} BALLS=$BALLS BALL_R=$BALL_R RING_R=$RING_R HOLE_DEG=$HOLE_DEG SPIN=$SPIN SPEED=$SPEED"
@@ -23,20 +21,6 @@ echo "STREAM_KEY length: ${#STREAM_KEY}"
 node -v
 ffmpeg -version | head -n 2
 echo "====================="
-
-URL="rtmps://live.twitch.tv/app/${STREAM_KEY}"
-
-echo "=== STEP 1: QUICK TWITCH KEY TEST (10 seconds) ==="
-# If this does NOT go live, your stream key / channel is the issue — not the game.
-timeout 10 ffmpeg -hide_banner -loglevel info -stats \
-  -f lavfi -i "testsrc=size=${W}x${H}:rate=${FPS}" \
-  -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
-  -map 0:v -map 1:a \
-  -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 60 \
-  -c:a aac -b:a 128k -ar 44100 \
-  -f flv "$URL" || true
-
-echo "=== STEP 2: START GAME STREAM (FOREVER UNTIL RUNNER STOPS) ==="
 
 cat > /tmp/sim.js <<'JS'
 'use strict';
@@ -53,7 +37,7 @@ const SPIN     = +process.env.SPIN || 0.9;
 const SPEED    = +process.env.SPEED || 90;
 
 const CX = W*0.5, CY = H*0.5;
-const dt = 1/FPS;
+const dt = 1 / FPS;
 
 const buf = Buffer.alloc(W*H*3);
 function setPix(x,y,r,g,b){
@@ -69,7 +53,7 @@ function randColor(){ return [rndi(40,235), rndi(40,235), rndi(40,235)]; }
 
 const TXT=[255,215,0]; // yellow
 
-// simple 5x7 A-Z + space
+// 5x7 font A-Z + space
 const FONT={
   'A':[0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
   'B':[0b11110,0b10001,0b11110,0b10001,0b10001,0b10001,0b11110],
@@ -101,7 +85,7 @@ const FONT={
 };
 
 function drawChar(ch,x,y,scale,color){
-  const rows = FONT[ch] || FONT[' '];
+  const rows=FONT[ch] || FONT[' '];
   const [r,g,b]=color;
   for(let rr=0;rr<7;rr++){
     const bits=rows[rr];
@@ -115,7 +99,7 @@ function drawChar(ch,x,y,scale,color){
   }
 }
 function drawTextFit(text,cx,cy,scale,color,maxW){
-  text = text.toUpperCase();
+  text = String(text).toUpperCase();
   const charW=5*scale, gap=scale;
   const fit=Math.max(1, Math.floor((maxW+gap)/(charW+gap)));
   if(text.length>fit) text=text.slice(0,fit);
@@ -186,7 +170,7 @@ function spawn(i){
 }
 for(let i=0;i<N;i++) spawn(i);
 
-// grid accel
+// grid accel for collisions
 const cellSize = R*3;
 const gridW = Math.ceil(W/cellSize);
 const gridH = Math.ceil(H/cellSize);
@@ -205,7 +189,7 @@ function gpush(i,x,y){
 
 let t=0, frames=0, last=Date.now();
 
-function step(){
+function stepPhysics(){
   t += dt;
   const holeCenterDeg = (t*SPIN*180/Math.PI)%360;
 
@@ -239,12 +223,14 @@ function step(){
               const j=other[bj];
               if(base===(ny*gridW+nx) && j<=i) continue;
               const B=balls[j];
+
               const dx=B.x-A.x, dy=B.y-A.y;
               const d2=dx*dx+dy*dy;
               if(d2>0 && d2<minD2){
                 const d=Math.sqrt(d2);
                 const nxn=dx/d, nyn=dy/d;
                 const overlap=minD-d;
+
                 A.x -= nxn*overlap*0.5; A.y -= nyn*overlap*0.5;
                 B.x += nxn*overlap*0.5; B.y += nyn*overlap*0.5;
 
@@ -273,7 +259,7 @@ function step(){
 
     if(dist>wallR){
       if(inHole(angDeg, holeCenterDeg)){
-        spawn(i); // forever
+        spawn(i); // respawn forever
         continue;
       }
       const nxn=dx/dist, nyn=dy/dist;
@@ -289,7 +275,7 @@ function step(){
   frames++;
   const now=Date.now();
   if(now-last>=5000){
-    console.error(`[sim] fps=${FPS} frames=${frames} balls=${N} ringR=${RING_R} holeDeg=${HOLE_DEG}`);
+    console.error(`[sim] frames=${frames} balls=${N} ringR=${RING_R} holeDeg=${HOLE_DEG}`);
     last=now;
   }
 }
@@ -320,22 +306,43 @@ function render(){
 }
 
 function writePPM(){
+  // IMPORTANT: one full PPM image per tick
   process.stdout.write(`P6\n${W} ${H}\n255\n`);
   process.stdout.write(buf);
 }
 
-while(true){
-  step();
+// ---- real-time tick with backpressure ----
+let busy = false;
+function tick(){
+  if (busy) return;
+  busy = true;
+
+  stepPhysics();
   render();
-  writePPM();
+
+  // backpressure handling
+  const header = `P6\n${W} ${H}\n255\n`;
+  const ok1 = process.stdout.write(header);
+  const ok2 = process.stdout.write(buf);
+
+  if (ok1 && ok2){
+    busy = false;
+    return;
+  }
+  process.stdout.once('drain', () => { busy = false; });
 }
+
+setInterval(tick, Math.round(1000 / FPS));
 JS
 
-# IMPORTANT: make ffmpeg print progress no matter what
+URL="rtmps://live.twitch.tv/app/${STREAM_KEY}"
+
+# Stream to Twitch (this stays up)
 node /tmp/sim.js | ffmpeg -hide_banner -loglevel info -stats \
   -f image2pipe -vcodec ppm -r "$FPS" -i - \
   -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
   -map 0:v -map 1:a \
-  -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 60 -b:v 2500k \
+  -c:v libx264 -preset ultrafast -tune zerolatency \
+  -pix_fmt yuv420p -g 60 -b:v 2500k \
   -c:a aac -b:a 128k -ar 44100 \
   -f flv "$URL"
