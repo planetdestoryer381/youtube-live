@@ -16,7 +16,7 @@ export BALL_R="${BALL_R:-14}"
 export RING_R="${RING_R:-125}"
 export HOLE_DEG="${HOLE_DEG:-80}"
 export SPIN="${SPIN:-1.2}"
-export SPEED="${SPEED:-85}"
+export SPEED="${SPEED:-255}"
 export PHYS_MULT="${PHYS_MULT:-3}"
 
 export WIN_SCREEN_SECONDS="${WIN_SCREEN_SECONDS:-6}"
