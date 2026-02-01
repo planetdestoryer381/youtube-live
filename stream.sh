@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -e
 
-: "${STREAM_URL:?Missing STREAM_URL}"
-: "${STREAM_KEY:?Missing STREAM_KEY}"
+OUT_FILE="numbers.txt"
+echo "starting..." > "$OUT_FILE"
 
-TEXT_FILE="numbers.txt"
-echo "starting..." > "$TEXT_FILE"
-
-# Update the text file with random numbers forever (until the job is killed).
+# Update numbers forever (until GitHub kills the runner)
 (
   while true; do
-    printf "Random: %s %s %s %s %s %s\nTime: %s\n" \
-      "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" \
-      "$(date -u +"%Y-%m-%d %H:%M:%S UTC")" > "$TEXT_FILE"
-    sleep 0.1
+    echo "Random numbers:" > "$OUT_FILE"
+    for i in {1..8}; do
+      echo "$RANDOM  $RANDOM  $RANDOM" >> "$OUT_FILE"
+    done
+    echo "UTC: $(date -u +"%Y-%m-%d %H:%M:%S")" >> "$OUT_FILE"
+    sleep 0.2
   done
 ) &
 
-# Stream a generated background + the text overlay.
+# Stream to Twitch
 ffmpeg -hide_banner -loglevel warning \
   -f lavfi -i "color=size=1280x720:rate=30:color=black" \
-  -vf "drawtext=fontcolor=white:fontsize=48:x=(w-text_w)/2:y=(h-text_h)/2:textfile=${TEXT_FILE}:reload=1" \
+  -vf "drawtext=textfile=${OUT_FILE}:reload=1:fontcolor=white:fontsize=48:x=(w-text_w)/2:y=(h-text_h)/2" \
   -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
-  -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p -g 60 -b:v 2500k \
-  -c:a aac -b:a 128k -ar 44100 \
-  -f flv "${STREAM_URL}/${STREAM_KEY}"
+  -c:v libx264 -preset veryfast -tune zerolatency \
+  -pix_fmt yuv420p -g 60 -b:v 2500k \
+  -c:a aac -b:a 128k \
+  -f flv "rtmps://live.twitch.tv/app/${STREAM_KEY}"
