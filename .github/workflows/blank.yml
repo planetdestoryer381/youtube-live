@@ -1,4 +1,4 @@
-name: Twitch Livestream Test
+name: Twitch Physics Ring
 
 on:
   workflow_dispatch:
@@ -14,9 +14,16 @@ jobs:
       - name: Install FFmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      - name: Start stream
+      - name: Stream
         env:
           STREAM_KEY: ${{ secrets.STREAM_KEY }}
+          FPS: "20"
+          W: "854"
+          H: "480"
+          BALLS: "200"
+          RING_R: "160"
+          HOLE_DEG: "70"
+          SPIN: "0.9"
         run: |
           chmod +x stream.sh
           ./stream.sh
