@@ -1,0 +1,24 @@
+name: Random Numbers Livestream
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # job cap is still enforced on hosted runners
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Start stream
+        env:
+          STREAM_URL: ${{ secrets.STREAM_URL }}
+          STREAM_KEY: ${{ secrets.STREAM_KEY }}
+        run: |
+          chmod +x stream.sh
+          ./stream.sh
