@@ -14,7 +14,7 @@ export H="${H:-480}"
 export BALLS="${BALLS:-200}"
 export BALL_R="${BALL_R:-14}"
 export RING_R="${RING_R:-125}"
-export HOLE_DEG="${HOLE_DEG:-80}"
+export HOLE_DEG="${HOLE_DEG:-90}"
 export SPIN="${SPIN:-1.2}"
 export SPEED="${SPEED:-255}"
 export PHYS_MULT="${PHYS_MULT:-3}"
@@ -41,9 +41,9 @@ const H   = +process.env.H   || 480;
 const MAX_BALLS = +process.env.BALLS || 200;
 const R        = +process.env.BALL_R || 14;
 const RING_R   = +process.env.RING_R || 125;
-const HOLE_DEG = +process.env.HOLE_DEG || 80;
+const HOLE_DEG = +process.env.HOLE_DEG || 90;
 const SPIN     = +process.env.SPIN || 1.2;
-const SPEED    = +process.env.SPEED || 85;
+const SPEED    = +process.env.SPEED || 255;
 const PHYS_MULT = +process.env.PHYS_MULT || 3;
 
 const WIN_SECONDS = +process.env.WIN_SCREEN_SECONDS || 6;
@@ -53,7 +53,7 @@ const TWITCH_CHANNEL = process.env.TWITCH_CHANNEL || "";
 const TWITCH_NICK    = process.env.TWITCH_NICK || "";
 
 const CX = W*0.5, CY = H*0.5;
-const dt = (PHYS_MULT) / FPS; // 3x faster physics
+const dt = (PHYS_MULT) / FPS;
 
 // ---------- framebuffer ----------
 const rgb = Buffer.alloc(W*H*3);
@@ -84,7 +84,7 @@ function rectOutline(x,y,w,h,col){
   for(let i=0;i<h;i++){ setPix(x,y+i,r,g,b); setPix(x+w-1,y+i,r,g,b); }
 }
 
-// ---------- tiny font ----------
+// ---------- font ----------
 const FONT={
   'A':[0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
   'B':[0b11110,0b10001,0b11110,0b10001,0b10001,0b10001,0b11110],
@@ -122,6 +122,7 @@ const FONT={
   '7':[0b11111,0b00001,0b00010,0b00100,0b01000,0b01000,0b01000],
   '8':[0b01110,0b10001,0b10001,0b01110,0b10001,0b10001,0b01110],
   '9':[0b01110,0b10001,0b10001,0b01111,0b00001,0b00010,0b01100],
+  '/':[0b00001,0b00010,0b00100,0b01000,0b10000,0,0],
   ' ':[0,0,0,0,0,0,0],
   '-':[0,0,0b11111,0,0,0,0],
 };
@@ -157,7 +158,7 @@ function drawTextCentered(text,cx,cy,scale,color){
   drawText(text, (cx-w/2)|0, (cy-h/2)|0, scale, color);
 }
 
-// deterministic icon+color
+// deterministic colors/icons
 function hashStr(s){
   s=String(s);
   let h=2166136261>>>0;
@@ -176,7 +177,7 @@ function isoFromName(name){
   return t.length>=2 ? t.slice(0,2) : "??";
 }
 
-// ball mask
+// ball drawing
 const mask=[];
 for(let y=-R;y<=R;y++) for(let x=-R;x<=R;x++) if(x*x+y*y<=R*R) mask.push([x,y]);
 
@@ -202,7 +203,7 @@ function inHole(angleDeg, holeCenterDeg){
 function drawRing(holeCenterDeg){
   const thick=4;
   for(let deg=0;deg<360;deg+=1){
-    if(inHole(deg,holeCenterDeg)) continue;
+    if(inHole(deg, holeCenterDeg)) continue;
     const a=deg*Math.PI/180;
     const x=(CX+Math.cos(a)*RING_R)|0;
     const y=(CY+Math.sin(a)*RING_R)|0;
@@ -238,7 +239,10 @@ function drawTopUI(aliveCount,total){
   const cx0=pad+6+cardW;
   drawPanel(cx0,cardY,cardW-6,cardH,UI_BG2,UI_LINE);
   drawText("ALIVE", cx0+10, cardY+6, 1, [190,210,230]);
+
+  // ✅ FIX: make sure it prints "2/200" (with slash)
   drawText(`${aliveCount}/${total}`, cx0+10, cardY+20, 2, YELLOW);
+
   drawText("MODE: LAST ONE WINS", cx0+220, cardY+10, 1, [210,230,245]);
 
   const rx0=pad+6+cardW*2;
@@ -270,7 +274,7 @@ function drawProfileLabel(x,y,iso,name){
   drawText(label, bx+26, by+10, 1, [255,215,0]);
 }
 
-// chat
+// chat set + debug
 const countrySet = new Set([
   "QATAR","EGYPT","SAUDI ARABIA","UAE","OMAN","TUNISIA","MOROCCO","ALGERIA","JORDAN","LEBANON",
   "UNITED STATES","UNITED KINGDOM","FRANCE","GERMANY","SPAIN","ITALY","CANADA","BRAZIL","ARGENTINA",
@@ -296,7 +300,10 @@ function updateTopChatter(){
 }
 
 function startTwitchChat(){
-  if(!TWITCH_OAUTH || !TWITCH_CHANNEL || !TWITCH_NICK) return;
+  if(!TWITCH_OAUTH || !TWITCH_CHANNEL || !TWITCH_NICK){
+    console.error("[chat] disabled (missing TWITCH_OAUTH/TWITCH_CHANNEL/TWITCH_NICK)");
+    return;
+  }
 
   const sock = tls.connect(6697, 'irc.chat.twitch.tv', { rejectUnauthorized:false }, () => {
     sock.write(`PASS ${TWITCH_OAUTH}\r\n`);
@@ -307,12 +314,21 @@ function startTwitchChat(){
   });
 
   let acc='';
+  let printed=0;
+
   sock.on('data', (d)=>{
     acc += d.toString('utf8');
+
     let idx;
     while((idx=acc.indexOf('\r\n'))>=0){
       let line = acc.slice(0,idx);
       acc = acc.slice(idx+2);
+
+      // ✅ DEBUG: print first ~50 raw lines so we see what Twitch is sending
+      if(printed < 50){
+        console.error("[chat:raw]", line);
+        printed++;
+      }
 
       if(line.startsWith('PING')){
         sock.write('PONG :tmi.twitch.tv\r\n');
@@ -330,17 +346,23 @@ function startTwitchChat(){
         const user = m[1].toLowerCase();
         const msg  = m[2];
 
+        console.error(`[chat:msg] ${user}: ${msg}`);
+
         const info = chatUsers.get(user) || { msgs:0, country:null };
         info.msgs++;
 
         const c = normalizeCountry(msg);
-        if(c) info.country = c;
+        if(c){
+          info.country = c;
+          console.error(`[chat:country] ${user} -> ${c}`);
+        }
 
         chatUsers.set(user, info);
         updateTopChatter();
       }
     }
   });
+
   sock.on('error', e=>console.error('[chat] error', e.message));
   sock.on('end', ()=>console.error('[chat] ended'));
 }
@@ -352,7 +374,7 @@ let balls=[], alive=[], aliveCount=0;
 let state="PLAY";
 let t=0;
 let winnerName="none";
-let winFrames=0; // <-- only ONE declaration now
+let winFrames=0;
 
 function getRoundPlayers(){
   const players=[];
@@ -513,10 +535,16 @@ function stepPhysics(){
       b.y = CY + nyn*wallR;
 
       const vn=b.vx*nxn + b.vy*nyn;
-      if(vn>0){ b.vx -= 2*vn*nxn; b.vy -= 2*vn*nyn; }
-      b.vx *= 0.994; b.vy *= 0.994;
+      if(vn>0){
+        // perfect-ish elastic reflection
+        b.vx -= 2*vn*nxn;
+        b.vy -= 2*vn*nyn;
+      }
+      // ✅ NO damping here (keep speed)
     }
-    b.vx *= 0.999; b.vy *= 0.999;
+
+    // ✅ NO friction / NO momentum loss
+    // (removed b.vx *= 0.999, etc.)
   }
 
   return holeCenterDeg;
@@ -568,6 +596,7 @@ function writeFrameAtomic(){
 }
 
 let busy=false;
+
 function tick(){
   if(state==="PLAY"){
     const holeCenterDeg = stepPhysics();
