@@ -3,10 +3,9 @@ set -euo pipefail
 
 : "${STREAM_KEY:?STREAM_KEY missing}"
 
-# Chat (optional but recommended)
 : "${TWITCH_OAUTH:=}"
 : "${TWITCH_CHANNEL:=}"
-: "${TWITCH_NICK:=}"   # IMPORTANT: must match the token account
+: "${TWITCH_NICK:=}"
 
 export FPS="${FPS:-15}"
 export W="${W:-854}"
@@ -14,11 +13,11 @@ export H="${H:-480}"
 
 export BALLS="${BALLS:-200}"
 export BALL_R="${BALL_R:-14}"
-export RING_R="${RING_R:-125}"      # smaller circle, more cramped
+export RING_R="${RING_R:-125}"
 export HOLE_DEG="${HOLE_DEG:-80}"
 export SPIN="${SPIN:-1.2}"
 export SPEED="${SPEED:-85}"
-export PHYS_MULT="${PHYS_MULT:-3}"  # 3x faster physics
+export PHYS_MULT="${PHYS_MULT:-3}"
 
 export WIN_SCREEN_SECONDS="${WIN_SCREEN_SECONDS:-6}"
 
@@ -54,7 +53,7 @@ const TWITCH_CHANNEL = process.env.TWITCH_CHANNEL || "";
 const TWITCH_NICK    = process.env.TWITCH_NICK || "";
 
 const CX = W*0.5, CY = H*0.5;
-const dt = (PHYS_MULT) / FPS; // <-- 3x faster physics
+const dt = (PHYS_MULT) / FPS; // 3x faster physics
 
 // ---------- framebuffer ----------
 const rgb = Buffer.alloc(W*H*3);
@@ -123,8 +122,6 @@ const FONT={
   '7':[0b11111,0b00001,0b00010,0b00100,0b01000,0b01000,0b01000],
   '8':[0b01110,0b10001,0b10001,0b01110,0b10001,0b10001,0b01110],
   '9':[0b01110,0b10001,0b10001,0b01111,0b00001,0b00010,0b01100],
-  ':':[0,0b00100,0b00100,0,0b00100,0b00100,0],
-  '/':[0b00001,0b00010,0b00100,0b01000,0b10000,0,0],
   ' ':[0,0,0,0,0,0,0],
   '-':[0,0,0b11111,0,0,0,0],
 };
@@ -160,7 +157,7 @@ function drawTextCentered(text,cx,cy,scale,color){
   drawText(text, (cx-w/2)|0, (cy-h/2)|0, scale, color);
 }
 
-// ---------- deterministic “icon” & color ----------
+// deterministic icon+color
 function hashStr(s){
   s=String(s);
   let h=2166136261>>>0;
@@ -171,20 +168,15 @@ function hashStr(s){
   return h>>>0;
 }
 function colorFromName(name){
-  const h = hashStr(name);
-  const r = 60 + (h & 0x7F);
-  const g = 60 + ((h>>7) & 0x7F);
-  const b = 60 + ((h>>14) & 0x7F);
-  return [r,g,b];
+  const h=hashStr(name);
+  return [60+(h&0x7F), 60+((h>>7)&0x7F), 60+((h>>14)&0x7F)];
 }
 function isoFromName(name){
-  // simple iso-like icon: first 2 letters
-  name = String(name).toUpperCase().replace(/[^A-Z]/g,'');
-  if(name.length>=2) return name.slice(0,2);
-  return "??";
+  const t=String(name).toUpperCase().replace(/[^A-Z]/g,'');
+  return t.length>=2 ? t.slice(0,2) : "??";
 }
 
-// ---------- ball drawing ----------
+// ball mask
 const mask=[];
 for(let y=-R;y<=R;y++) for(let x=-R;x<=R;x++) if(x*x+y*y<=R*R) mask.push([x,y]);
 
@@ -201,7 +193,7 @@ function drawBall(cx,cy,col){
   }
 }
 
-// ---------- ring ----------
+// ring
 function inHole(angleDeg, holeCenterDeg){
   const half=HOLE_DEG/2;
   let d=(angleDeg-holeCenterDeg+180)%360-180;
@@ -210,7 +202,7 @@ function inHole(angleDeg, holeCenterDeg){
 function drawRing(holeCenterDeg){
   const thick=4;
   for(let deg=0;deg<360;deg+=1){
-    if(inHole(deg, holeCenterDeg)) continue;
+    if(inHole(deg,holeCenterDeg)) continue;
     const a=deg*Math.PI/180;
     const x=(CX+Math.cos(a)*RING_R)|0;
     const y=(CY+Math.sin(a)*RING_R)|0;
@@ -221,21 +213,17 @@ function drawRing(holeCenterDeg){
   }
 }
 
-// ---------- UI ----------
-const UI_BG=[35,55,80];
-const UI_BG2=[20,32,50];
-const UI_LINE=[90,120,150];
-const WHITE=[255,255,255];
-const YELLOW=[255,215,0];
+// UI
+const UI_BG=[35,55,80], UI_BG2=[20,32,50], UI_LINE=[90,120,150];
+const WHITE=[255,255,255], YELLOW=[255,215,0];
 
 let topChatter="none";
 let lastWinner="none";
 
 function drawPanel(x,y,w,h,fillCol,lineCol){
-  fillRect(x,y,w,h,fillCol);
-  rectOutline(x,y,w,h,lineCol);
+  fillRect(x,y,w,h,fillCol); rectOutline(x,y,w,h,lineCol);
 }
-function drawTopUI(aliveCount, total){
+function drawTopUI(aliveCount,total){
   const pad=10, barH=58;
   drawPanel(pad,pad,W-pad*2,barH,UI_BG,UI_LINE);
 
@@ -262,7 +250,6 @@ function drawJoinText(){
   drawTextCentered("WRITE YOUR COUNTRY IN CHAT TO JOIN", W/2, 95, 2, [0,0,0]);
 }
 
-// profile label: [ISO] + NAME (ready to become image+name later)
 function drawProfileLabel(x,y,iso,name){
   const label = String(name).toUpperCase().replace(/[^A-Z ]/g,' ').trim().slice(0,12);
   const boxW = Math.max(72, Math.min(120, label.length*6 + 32));
@@ -277,14 +264,13 @@ function drawProfileLabel(x,y,iso,name){
   fillRect(bx,by,boxW,boxH,[255,255,255]);
   rectOutline(bx,by,boxW,boxH,[0,0,0]);
 
-  // “icon” placeholder square
   fillRect(bx+6, by+6, 16, 16, [0,0,0]);
   drawText(iso, bx+8, by+10, 1, [255,255,255]);
 
   drawText(label, bx+26, by+10, 1, [255,215,0]);
 }
 
-// ---------- chat ----------
+// chat
 const countrySet = new Set([
   "QATAR","EGYPT","SAUDI ARABIA","UAE","OMAN","TUNISIA","MOROCCO","ALGERIA","JORDAN","LEBANON",
   "UNITED STATES","UNITED KINGDOM","FRANCE","GERMANY","SPAIN","ITALY","CANADA","BRAZIL","ARGENTINA",
@@ -294,14 +280,13 @@ const countrySet = new Set([
 function normalizeCountry(s){
   s=String(s||"").toUpperCase().replace(/[^A-Z ]/g,' ').replace(/\s+/g,' ').trim();
   if(countrySet.has(s)) return s;
-  // partial match
   if(s.length>=3){
     for(const c of countrySet) if(c.startsWith(s)) return c;
   }
   return null;
 }
 
-const chatUsers = new Map(); // user -> {msgs, country}
+const chatUsers = new Map(); // user -> {msgs,country}
 function updateTopChatter(){
   let best=null, bestN=-1;
   for(const [u,info] of chatUsers.entries()){
@@ -317,6 +302,7 @@ function startTwitchChat(){
     sock.write(`PASS ${TWITCH_OAUTH}\r\n`);
     sock.write(`NICK ${TWITCH_NICK}\r\n`);
     sock.write(`JOIN #${TWITCH_CHANNEL}\r\n`);
+    sock.write(`CAP REQ :twitch.tv/tags\r\n`);
     console.error(`[chat] connected to #${TWITCH_CHANNEL} as ${TWITCH_NICK}`);
   });
 
@@ -333,7 +319,7 @@ function startTwitchChat(){
         continue;
       }
 
-      // Strip tags if present: "@tag=...;tag=... :user!user@... PRIVMSG #chan :msg"
+      // strip @tags
       if(line[0]==='@'){
         const sp=line.indexOf(' ');
         if(sp>0) line=line.slice(sp+1);
@@ -360,14 +346,13 @@ function startTwitchChat(){
 }
 startTwitchChat();
 
-// ---------- game ----------
+// game
 function rand(a,b){ return a + Math.random()*(b-a); }
-
 let balls=[], alive=[], aliveCount=0;
 let state="PLAY";
 let t=0;
-let winFrames=0;
 let winnerName="none";
+let winFrames=0; // <-- only ONE declaration now
 
 function getRoundPlayers(){
   const players=[];
@@ -376,20 +361,18 @@ function getRoundPlayers(){
   }
   if(players.length>0) return players.slice(0, Math.min(MAX_BALLS, players.length));
 
-  // fallback fill
   const defaults = Array.from(countrySet);
   const out=[];
   for(let i=0;i<MAX_BALLS;i++) out.push(defaults[i % defaults.length]);
   return out;
 }
 
-// cramped spawn
 function startRound(){
   const names=getRoundPlayers();
   balls=[]; alive=new Array(names.length).fill(true); aliveCount=names.length;
 
   const innerR = RING_R - R - 6;
-  const spacing = R * 1.75; // tighter = more collisions
+  const spacing = R * 1.75;
   const sx = CX - innerR;
   const sy = CY - innerR;
 
@@ -429,7 +412,7 @@ function startRound(){
 }
 startRound();
 
-// grid for collisions
+// collisions grid
 const cellSize = R*3;
 const gridW = Math.ceil(W/cellSize);
 const gridH = Math.ceil(H/cellSize);
@@ -545,14 +528,11 @@ function renderPlay(holeCenterDeg){
   drawJoinText();
   drawRing(holeCenterDeg);
 
-  // labels are a bit heavy; still ok @15fps but we can cap if needed
   for(let i=0;i<balls.length;i++){
     if(!alive[i]) continue;
     const b=balls[i];
     drawBall(b.x|0, b.y|0, b.col);
-    // “icon”: ISO in the ball center
-    drawTextCentered(b.iso, b.x|0, b.y|0, 1, [255,255,255]);
-    // profile label under ball
+    drawTextCentered(b.iso, b.x|0, b.y|0, 1, WHITE);
     drawProfileLabel(b.x|0, b.y|0, b.iso, b.name);
   }
 }
@@ -578,24 +558,19 @@ function getWinnerIndex(){
   return -1;
 }
 
-// ---------- frame writer (FIXES “Invalid maxval: 0”) ----------
+// atomic PPM frame write
 const headerBuf = Buffer.from(`P6\n${W} ${H}\n255\n`);
 const frameBuf = Buffer.alloc(headerBuf.length + rgb.length);
-
 function writeFrameAtomic(){
-  headerBuf.copy(frameBuf, 0);
-  rgb.copy(frameBuf, headerBuf.length);
+  headerBuf.copy(frameBuf,0);
+  rgb.copy(frameBuf,headerBuf.length);
   return process.stdout.write(frameBuf);
 }
 
-// ---------- main loop ----------
 let busy=false;
-let winFrames=0;
-
 function tick(){
   if(state==="PLAY"){
     const holeCenterDeg = stepPhysics();
-
     if(aliveCount <= 1){
       const wi=getWinnerIndex();
       winnerName = wi>=0 ? balls[wi].name : "none";
@@ -630,6 +605,7 @@ JS
 URL="rtmps://live.twitch.tv/app/${STREAM_KEY}"
 
 node /tmp/sim.js | ffmpeg -hide_banner -loglevel info -stats \
+  -probesize 50M -analyzeduration 2M \
   -f image2pipe -vcodec ppm -r "$FPS" -i - \
   -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
   -map 0:v -map 1:a \
