@@ -21,8 +21,13 @@ export PHYS_MULT="${PHYS_MULT:-3}"
 
 export WIN_SCREEN_SECONDS="${WIN_SCREEN_SECONDS:-6}"
 
+# Flag sprite settings
+export FLAG_SIZE="${FLAG_SIZE:-24}"           # 24x24 flag on each ball
+export FLAGS_DIR="${FLAGS_DIR:-/tmp/flags}"   # cached between steps of same run
+
 echo "=== GAME SETTINGS ==="
 echo "FPS=$FPS SIZE=${W}x${H} BALLS=$BALLS BALL_R=$BALL_R RING_R=$RING_R HOLE_DEG=$HOLE_DEG SPIN=$SPIN SPEED=$SPEED PHYS_MULT=$PHYS_MULT"
+echo "FLAG_SIZE=$FLAG_SIZE FLAGS_DIR=$FLAGS_DIR"
 echo "WIN_SCREEN_SECONDS=$WIN_SCREEN_SECONDS"
 echo "STREAM_KEY length: ${#STREAM_KEY}"
 echo "TWITCH_CHAT: $([ -n "${TWITCH_OAUTH}" ] && [ -n "${TWITCH_CHANNEL}" ] && [ -n "${TWITCH_NICK}" ] && echo enabled || echo disabled)"
@@ -30,8 +35,81 @@ node -v
 ffmpeg -version | head -n 2
 echo "====================="
 
+mkdir -p "$FLAGS_DIR"
+
+# ---- Download + convert flags to raw RGB using ffmpeg (no node image libs needed)
+# Flag source: flagcdn (simple stable URLs). If you later want identical assets, we can commit them instead.
+# NOTE: only countries listed in the map get real flags; others fall back to colored circles.
+download_flag () {
+  local iso="$1"
+  local size="$2"
+  local out_rgb="$FLAGS_DIR/${iso}_${size}.rgb"
+
+  if [ -s "$out_rgb" ]; then
+    return 0
+  fi
+
+  local png="$FLAGS_DIR/${iso}.png"
+
+  # 1) download if missing
+  if [ ! -s "$png" ]; then
+    # flagcdn uses lowercase iso2
+    curl -fsSL "https://flagcdn.com/w80/${iso}.png" -o "$png" || return 0
+  fi
+
+  # 2) convert PNG -> raw RGB bytes (size x size x 3)
+  ffmpeg -hide_banner -loglevel error -y \
+    -i "$png" \
+    -vf "scale=${size}:${size}:flags=lanczos" \
+    -f rawvideo -pix_fmt rgb24 "$out_rgb" || true
+}
+
+# Minimal country->ISO2 mapping for flags.
+# We can expand to 200 countries later (or auto-load a full list file).
+declare -A ISO_MAP=(
+  ["EGYPT"]="eg"
+  ["QATAR"]="qa"
+  ["SAUDI ARABIA"]="sa"
+  ["UAE"]="ae"
+  ["OMAN"]="om"
+  ["TUNISIA"]="tn"
+  ["MOROCCO"]="ma"
+  ["ALGERIA"]="dz"
+  ["JORDAN"]="jo"
+  ["LEBANON"]="lb"
+  ["UNITED STATES"]="us"
+  ["UNITED KINGDOM"]="gb"
+  ["FRANCE"]="fr"
+  ["GERMANY"]="de"
+  ["SPAIN"]="es"
+  ["ITALY"]="it"
+  ["CANADA"]="ca"
+  ["BRAZIL"]="br"
+  ["ARGENTINA"]="ar"
+  ["CHINA"]="cn"
+  ["INDIA"]="in"
+  ["JAPAN"]="jp"
+  ["KOREA"]="kr"
+  ["TURKIYE"]="tr"
+  ["RUSSIA"]="ru"
+  ["UKRAINE"]="ua"
+  ["POLAND"]="pl"
+  ["NETHERLANDS"]="nl"
+  ["SWEDEN"]="se"
+  ["NORWAY"]="no"
+)
+
+# Download flags once at startup (fast)
+echo "[flags] preparing..."
+for name in "${!ISO_MAP[@]}"; do
+  iso="${ISO_MAP[$name]}"
+  download_flag "$iso" "$FLAG_SIZE" || true
+done
+echo "[flags] done."
+
 cat > /tmp/sim.js <<'JS'
 'use strict';
+const fs = require('fs');
 const tls = require('tls');
 
 const FPS = +process.env.FPS || 15;
@@ -47,6 +125,9 @@ const SPEED    = +process.env.SPEED || 255;
 const PHYS_MULT = +process.env.PHYS_MULT || 3;
 
 const WIN_SECONDS = +process.env.WIN_SCREEN_SECONDS || 6;
+
+const FLAG_SIZE = +process.env.FLAG_SIZE || 24;
+const FLAGS_DIR = process.env.FLAGS_DIR || "/tmp/flags";
 
 const TWITCH_OAUTH   = process.env.TWITCH_OAUTH || "";
 const TWITCH_CHANNEL = process.env.TWITCH_CHANNEL || "";
@@ -65,26 +146,13 @@ function setPix(x,y,r,g,b){
 function fillSolid(r,g,b){
   for(let i=0;i<rgb.length;i+=3){ rgb[i]=r; rgb[i+1]=g; rgb[i+2]=b; }
 }
-function clearSky(){ fillSolid(155,215,255); }
-function fillRect(x,y,w,h,col){
-  const [r,g,b]=col;
-  const x0=Math.max(0,x|0), y0=Math.max(0,y|0);
-  const x1=Math.min(W,(x+w)|0), y1=Math.min(H,(y+h)|0);
-  for(let yy=y0; yy<y1; yy++){
-    let idx=(yy*W + x0)*3;
-    for(let xx=x0; xx<x1; xx++){
-      rgb[idx]=r; rgb[idx+1]=g; rgb[idx+2]=b;
-      idx+=3;
-    }
-  }
-}
-function rectOutline(x,y,w,h,col){
-  const [r,g,b]=col;
-  for(let i=0;i<w;i++){ setPix(x+i,y,r,g,b); setPix(x+i,y+h-1,r,g,b); }
-  for(let i=0;i<h;i++){ setPix(x,y+i,r,g,b); setPix(x+w-1,y+i,r,g,b); }
+
+// ✅ darker background so white text stands out
+function clearBG(){
+  fillSolid(14, 20, 38); // deep navy
 }
 
-// ---------- font ----------
+// ---------- tiny font ----------
 const FONT={
   'A':[0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
   'B':[0b11110,0b10001,0b11110,0b10001,0b10001,0b10001,0b11110],
@@ -158,7 +226,18 @@ function drawTextCentered(text,cx,cy,scale,color){
   drawText(text, (cx-w/2)|0, (cy-h/2)|0, scale, color);
 }
 
-// deterministic colors/icons
+// Shadowed white text for readability
+function drawTextShadow(text,x,y,scale){
+  drawText(text, x+1, y+1, scale, [0,0,0]);
+  drawText(text, x, y, scale, [255,255,255]);
+}
+function drawTextCenteredShadow(text,cx,cy,scale){
+  const w=textWidth(text,scale), h=7*scale;
+  const x=(cx-w/2)|0, y=(cy-h/2)|0;
+  drawTextShadow(text,x,y,scale);
+}
+
+// ---------- deterministic color ----------
 function hashStr(s){
   s=String(s);
   let h=2166136261>>>0;
@@ -172,22 +251,63 @@ function colorFromName(name){
   const h=hashStr(name);
   return [60+(h&0x7F), 60+((h>>7)&0x7F), 60+((h>>14)&0x7F)];
 }
-function isoFromName(name){
-  const t=String(name).toUpperCase().replace(/[^A-Z]/g,'');
-  return t.length>=2 ? t.slice(0,2) : "??";
+
+// ---------- flag sprite loading ----------
+function loadFlagRGB(iso2){
+  // expects /tmp/flags/{iso}_{size}.rgb
+  const p = `${FLAGS_DIR}/${iso2}_${FLAG_SIZE}.rgb`;
+  try{
+    const buf = fs.readFileSync(p);
+    if(buf.length === FLAG_SIZE*FLAG_SIZE*3) return buf;
+  }catch{}
+  return null;
 }
 
-// ball drawing
+// same mapping used in bash (keep consistent)
+const ISO_MAP = new Map(Object.entries({
+  "EGYPT":"eg","QATAR":"qa","SAUDI ARABIA":"sa","UAE":"ae","OMAN":"om","TUNISIA":"tn","MOROCCO":"ma","ALGERIA":"dz",
+  "JORDAN":"jo","LEBANON":"lb","UNITED STATES":"us","UNITED KINGDOM":"gb","FRANCE":"fr","GERMANY":"de","SPAIN":"es",
+  "ITALY":"it","CANADA":"ca","BRAZIL":"br","ARGENTINA":"ar","CHINA":"cn","INDIA":"in","JAPAN":"jp","KOREA":"kr",
+  "TURKIYE":"tr","RUSSIA":"ru","UKRAINE":"ua","POLAND":"pl","NETHERLANDS":"nl","SWEDEN":"se","NORWAY":"no"
+}));
+
+// ---------- draw a ball with a flag sprite ----------
 const mask=[];
 for(let y=-R;y<=R;y++) for(let x=-R;x<=R;x++) if(x*x+y*y<=R*R) mask.push([x,y]);
 
-function drawBall(cx,cy,col){
-  const [r,g,b]=col;
+function drawBallWithFlag(cx,cy,baseCol,flagBuf){
   const x0=cx|0, y0=cy|0;
+
+  // base circle
+  const [r,g,b]=baseCol;
   for(let k=0;k<mask.length;k++){
     const dx=mask[k][0], dy=mask[k][1];
     setPix(x0+dx,y0+dy,r,g,b);
   }
+
+  // flag overlay centered
+  if(flagBuf){
+    const half=(FLAG_SIZE/2)|0;
+    const fx0 = (x0 - half)|0;
+    const fy0 = (y0 - half)|0;
+
+    for(let fy=0; fy<FLAG_SIZE; fy++){
+      for(let fx=0; fx<FLAG_SIZE; fx++){
+        const sx = fx0 + fx;
+        const sy = fy0 + fy;
+
+        // clip to circle so the flag stays inside the ball
+        const dx = sx - x0;
+        const dy = sy - y0;
+        if(dx*dx + dy*dy > (R-1)*(R-1)) continue;
+
+        const si = (fy*FLAG_SIZE + fx)*3;
+        setPix(sx, sy, flagBuf[si], flagBuf[si+1], flagBuf[si+2]);
+      }
+    }
+  }
+
+  // border
   for(let deg=0;deg<360;deg+=14){
     const a=deg*Math.PI/180;
     setPix((x0+Math.cos(a)*R)|0, (y0+Math.sin(a)*R)|0, 0,0,0);
@@ -203,21 +323,36 @@ function inHole(angleDeg, holeCenterDeg){
 function drawRing(holeCenterDeg){
   const thick=4;
   for(let deg=0;deg<360;deg+=1){
-    if(inHole(deg, holeCenterDeg)) continue;
+    if(inHole(deg,holeCenterDeg)) continue;
     const a=deg*Math.PI/180;
     const x=(CX+Math.cos(a)*RING_R)|0;
     const y=(CY+Math.sin(a)*RING_R)|0;
     for(let k=-thick;k<=thick;k++){
-      setPix(x+k,y,30,30,30);
-      setPix(x,y+k,30,30,30);
+      setPix(x+k,y,220,220,220);
+      setPix(x,y+k,220,220,220);
     }
   }
 }
 
 // UI
-const UI_BG=[35,55,80], UI_BG2=[20,32,50], UI_LINE=[90,120,150];
-const WHITE=[255,255,255], YELLOW=[255,215,0];
-
+function fillRect(x,y,w,h,col){
+  const [r,g,b]=col;
+  const x0=Math.max(0,x|0), y0=Math.max(0,y|0);
+  const x1=Math.min(W,(x+w)|0), y1=Math.min(H,(y+h)|0);
+  for(let yy=y0; yy<y1; yy++){
+    let idx=(yy*W + x0)*3;
+    for(let xx=x0; xx<x1; xx++){
+      rgb[idx]=r; rgb[idx+1]=g; rgb[idx+2]=b;
+      idx+=3;
+    }
+  }
+}
+function rectOutline(x,y,w,h,col){
+  const [r,g,b]=col;
+  for(let i=0;i<w;i++){ setPix(x+i,y,r,g,b); setPix(x+i,y+h-1,r,g,b); }
+  for(let i=0;i<h;i++){ setPix(x,y+i,r,g,b); setPix(x+w-1,y+i,r,g,b); }
+}
+const UI_BG=[24,34,58], UI_BG2=[14,20,38], UI_LINE=[100,140,190];
 let topChatter="none";
 let lastWinner="none";
 
@@ -233,64 +368,42 @@ function drawTopUI(aliveCount,total){
   const cardW=(W-pad*2 - 20)/3;
 
   drawPanel(pad+6,cardY,cardW-6,cardH,UI_BG2,UI_LINE);
-  drawText("LAST WINNER", pad+14, cardY+6, 1, [190,210,230]);
-  drawText(String(lastWinner).slice(0,18), pad+14, cardY+20, 2, WHITE);
+  drawText("LAST WINNER", pad+14, cardY+6, 1, [180,200,230]);
+  drawTextShadow(String(lastWinner).slice(0,18), pad+14, cardY+20, 2);
 
   const cx0=pad+6+cardW;
   drawPanel(cx0,cardY,cardW-6,cardH,UI_BG2,UI_LINE);
-  drawText("ALIVE", cx0+10, cardY+6, 1, [190,210,230]);
-
-  // ✅ FIX: make sure it prints "2/200" (with slash)
-  drawText(`${aliveCount}/${total}`, cx0+10, cardY+20, 2, YELLOW);
-
-  drawText("MODE: LAST ONE WINS", cx0+220, cardY+10, 1, [210,230,245]);
+  drawText("ALIVE", cx0+10, cardY+6, 1, [180,200,230]);
+  drawTextShadow(`${aliveCount}/${total}`, cx0+10, cardY+20, 2);
 
   const rx0=pad+6+cardW*2;
   drawPanel(rx0,cardY,cardW-6,cardH,UI_BG2,UI_LINE);
-  drawText("TOP CHATTER", rx0+10, cardY+6, 1, [190,210,230]);
-  drawText(String(topChatter).slice(0,14), rx0+10, cardY+20, 2, WHITE);
+  drawText("TOP CHATTER", rx0+10, cardY+6, 1, [180,200,230]);
+  drawTextShadow(String(topChatter).slice(0,14), rx0+10, cardY+20, 2);
 }
 function drawJoinText(){
-  drawTextCentered("WRITE YOUR COUNTRY IN CHAT TO JOIN", W/2, 95, 2, [0,0,0]);
+  drawTextCenteredShadow("WRITE YOUR COUNTRY IN CHAT TO JOIN", W/2, 95, 2);
 }
 
-function drawProfileLabel(x,y,iso,name){
-  const label = String(name).toUpperCase().replace(/[^A-Z ]/g,' ').trim().slice(0,12);
-  const boxW = Math.max(72, Math.min(120, label.length*6 + 32));
-  const boxH = 28;
-
-  let bx = (x - boxW/2)|0;
-  let by = (y + R + 4)|0;
-
-  bx = Math.max(2, Math.min(W-boxW-2, bx));
-  by = Math.max(70, Math.min(H-boxH-2, by));
-
-  fillRect(bx,by,boxW,boxH,[255,255,255]);
-  rectOutline(bx,by,boxW,boxH,[0,0,0]);
-
-  fillRect(bx+6, by+6, 16, 16, [0,0,0]);
-  drawText(iso, bx+8, by+10, 1, [255,255,255]);
-
-  drawText(label, bx+26, by+10, 1, [255,215,0]);
+// ✅ NO white label background: we just draw clean white text with shadow
+function drawNameUnderBall(x,y,name){
+  const label = String(name).toUpperCase().replace(/[^A-Z ]/g,' ').trim().slice(0,14);
+  const w = textWidth(label, 1);
+  const tx = (x - w/2)|0;
+  const ty = (y + R + 6)|0;
+  drawTextShadow(label, tx, ty, 1);
 }
 
-// chat set + debug
-const countrySet = new Set([
-  "QATAR","EGYPT","SAUDI ARABIA","UAE","OMAN","TUNISIA","MOROCCO","ALGERIA","JORDAN","LEBANON",
-  "UNITED STATES","UNITED KINGDOM","FRANCE","GERMANY","SPAIN","ITALY","CANADA","BRAZIL","ARGENTINA",
-  "CHINA","INDIA","JAPAN","KOREA","TURKIYE","RUSSIA","UKRAINE","POLAND","NETHERLANDS","SWEDEN","NORWAY"
-]);
+// chat (logs kept)
+const countrySet = new Set(Array.from(ISO_MAP.keys()));
 
 function normalizeCountry(s){
   s=String(s||"").toUpperCase().replace(/[^A-Z ]/g,' ').replace(/\s+/g,' ').trim();
   if(countrySet.has(s)) return s;
-  if(s.length>=3){
-    for(const c of countrySet) if(c.startsWith(s)) return c;
-  }
   return null;
 }
 
-const chatUsers = new Map(); // user -> {msgs,country}
+const chatUsers = new Map();
 function updateTopChatter(){
   let best=null, bestN=-1;
   for(const [u,info] of chatUsers.entries()){
@@ -313,39 +426,28 @@ function startTwitchChat(){
     console.error(`[chat] connected to #${TWITCH_CHANNEL} as ${TWITCH_NICK}`);
   });
 
-  let acc='';
-  let printed=0;
-
+  let acc='', printed=0;
   sock.on('data', (d)=>{
     acc += d.toString('utf8');
-
     let idx;
     while((idx=acc.indexOf('\r\n'))>=0){
       let line = acc.slice(0,idx);
       acc = acc.slice(idx+2);
 
-      // ✅ DEBUG: print first ~50 raw lines so we see what Twitch is sending
-      if(printed < 50){
-        console.error("[chat:raw]", line);
-        printed++;
-      }
+      if(printed < 25){ console.error("[chat:raw]", line); printed++; }
 
       if(line.startsWith('PING')){
         sock.write('PONG :tmi.twitch.tv\r\n');
         continue;
       }
-
-      // strip @tags
       if(line[0]==='@'){
         const sp=line.indexOf(' ');
         if(sp>0) line=line.slice(sp+1);
       }
-
       const m = line.match(/^:([^!]+)![^ ]+ PRIVMSG #[^ ]+ :(.+)$/);
       if(m){
-        const user = m[1].toLowerCase();
-        const msg  = m[2];
-
+        const user=m[1].toLowerCase();
+        const msg=m[2];
         console.error(`[chat:msg] ${user}: ${msg}`);
 
         const info = chatUsers.get(user) || { msgs:0, country:null };
@@ -356,13 +458,11 @@ function startTwitchChat(){
           info.country = c;
           console.error(`[chat:country] ${user} -> ${c}`);
         }
-
         chatUsers.set(user, info);
         updateTopChatter();
       }
     }
   });
-
   sock.on('error', e=>console.error('[chat] error', e.message));
   sock.on('end', ()=>console.error('[chat] ended'));
 }
@@ -383,7 +483,8 @@ function getRoundPlayers(){
   }
   if(players.length>0) return players.slice(0, Math.min(MAX_BALLS, players.length));
 
-  const defaults = Array.from(countrySet);
+  // fallback: cycle through ISO_MAP keys
+  const defaults = Array.from(ISO_MAP.keys());
   const out=[];
   for(let i=0;i<MAX_BALLS;i++) out.push(defaults[i % defaults.length]);
   return out;
@@ -404,10 +505,12 @@ function startRound(){
       const dx=x-CX, dy=y-CY;
       if(dx*dx+dy*dy <= innerR*innerR){
         const name=names[idx++];
+        const iso = ISO_MAP.get(name) || null;
+        const flag = iso ? loadFlagRGB(iso) : null;
         balls.push({
           name,
-          iso: isoFromName(name),
-          col: colorFromName(name),
+          baseCol: colorFromName(name),
+          flag,
           x: x + rand(-R*0.35, R*0.35),
           y: y + rand(-R*0.35, R*0.35),
           vx: rand(-SPEED,SPEED),
@@ -418,10 +521,12 @@ function startRound(){
   }
   while(idx<names.length){
     const name=names[idx++];
+    const iso = ISO_MAP.get(name) || null;
+    const flag = iso ? loadFlagRGB(iso) : null;
     balls.push({
       name,
-      iso: isoFromName(name),
-      col: colorFromName(name),
+      baseCol: colorFromName(name),
+      flag,
       x: CX + rand(-innerR*0.15, innerR*0.15),
       y: CY + rand(-innerR*0.15, innerR*0.15),
       vx: rand(-SPEED,SPEED),
@@ -434,12 +539,11 @@ function startRound(){
 }
 startRound();
 
-// collisions grid
+// collision grid
 const cellSize = R*3;
 const gridW = Math.ceil(W/cellSize);
 const gridH = Math.ceil(H/cellSize);
 const grid = new Array(gridW*gridH);
-
 function gclear(){ grid.fill(null); }
 function gidx(x,y){
   const gx=Math.max(0,Math.min(gridW-1,(x/cellSize)|0));
@@ -465,28 +569,22 @@ function stepPhysics(){
   }
 
   const minD=2*R, minD2=minD*minD;
-
   for(let gy=0; gy<gridH; gy++){
     for(let gx=0; gx<gridW; gx++){
       const base=gy*gridW+gx;
       const cell=grid[base];
       if(!cell) continue;
-
       for(let oy=-1; oy<=1; oy++){
         for(let ox=-1; ox<=1; ox++){
           const nx=gx+ox, ny=gy+oy;
           if(nx<0||ny<0||nx>=gridW||ny>=gridH) continue;
           const other=grid[ny*gridW+nx];
           if(!other) continue;
-
           for(let ai=0; ai<cell.length; ai++){
-            const i=cell[ai];
-            if(!alive[i]) continue;
+            const i=cell[ai]; if(!alive[i]) continue;
             const A=balls[i];
-
             for(let bj=0; bj<other.length; bj++){
-              const j=other[bj];
-              if(!alive[j]) continue;
+              const j=other[bj]; if(!alive[j]) continue;
               if(base===(ny*gridW+nx) && j<=i) continue;
 
               const B=balls[j];
@@ -496,7 +594,6 @@ function stepPhysics(){
                 const d=Math.sqrt(d2);
                 const nxn=dx/d, nyn=dy/d;
                 const overlap=minD-d;
-
                 A.x -= nxn*overlap*0.5; A.y -= nyn*overlap*0.5;
                 B.x += nxn*overlap*0.5; B.y += nyn*overlap*0.5;
 
@@ -519,7 +616,6 @@ function stepPhysics(){
   for(let i=0;i<balls.length;i++){
     if(!alive[i]) continue;
     const b=balls[i];
-
     const dx=b.x-CX, dy=b.y-CY;
     const dist=Math.sqrt(dx*dx+dy*dy)||0.0001;
     const angDeg=(Math.atan2(dy,dx)*180/Math.PI+360)%360;
@@ -536,22 +632,17 @@ function stepPhysics(){
 
       const vn=b.vx*nxn + b.vy*nyn;
       if(vn>0){
-        // perfect-ish elastic reflection
         b.vx -= 2*vn*nxn;
         b.vy -= 2*vn*nyn;
       }
-      // ✅ NO damping here (keep speed)
+      // no damping (keep speed)
     }
-
-    // ✅ NO friction / NO momentum loss
-    // (removed b.vx *= 0.999, etc.)
   }
-
   return holeCenterDeg;
 }
 
 function renderPlay(holeCenterDeg){
-  clearSky();
+  clearBG();
   drawTopUI(aliveCount, balls.length);
   drawJoinText();
   drawRing(holeCenterDeg);
@@ -559,26 +650,25 @@ function renderPlay(holeCenterDeg){
   for(let i=0;i<balls.length;i++){
     if(!alive[i]) continue;
     const b=balls[i];
-    drawBall(b.x|0, b.y|0, b.col);
-    drawTextCentered(b.iso, b.x|0, b.y|0, 1, WHITE);
-    drawProfileLabel(b.x|0, b.y|0, b.iso, b.name);
+    drawBallWithFlag(b.x|0, b.y|0, b.baseCol, b.flag);
+    drawNameUnderBall(b.x|0, b.y|0, b.name);
   }
 }
 
 function renderWin(){
-  fillSolid(10,16,28);
+  fillSolid(8,10,18);
   const panelW=Math.min(W-60,760), panelH=240;
   const px=((W-panelW)/2)|0, py=70;
 
   drawPanel(px,py,panelW,panelH,UI_BG,UI_LINE);
-  drawTextCentered("ROUND SUMMARY", W/2, py+45, 3, WHITE);
-  drawTextCentered("THE LAST ONE INSIDE THE ARENA WINS", W/2, py+75, 1, [210,230,245]);
+  drawTextCenteredShadow("ROUND SUMMARY", W/2, py+45, 3);
+  drawTextCenteredShadow("THE LAST ONE INSIDE THE ARENA WINS", W/2, py+75, 1);
 
-  drawPanel(px+20, py+100, panelW-40, 110, UI_BG2, UI_LINE);
-  drawText("WINNER:", px+35, py+130, 2, WHITE);
-  drawText(String(winnerName).slice(0,26), px+170, py+130, 2, YELLOW);
+  drawPanel(px+20, py+100, panelW-40, 110, [14,20,38], UI_LINE);
+  drawTextShadow("WINNER:", px+35, py+130, 2);
+  drawTextShadow(String(winnerName).slice(0,26), px+170, py+130, 2);
 
-  drawTextCentered("NEXT ROUND STARTING...", W/2, py+panelH+40, 2, [210,230,245]);
+  drawTextCenteredShadow("NEXT ROUND STARTING...", W/2, py+panelH+40, 2);
 }
 
 function getWinnerIndex(){
@@ -586,7 +676,7 @@ function getWinnerIndex(){
   return -1;
 }
 
-// atomic PPM frame write
+// atomic PPM output
 const headerBuf = Buffer.from(`P6\n${W} ${H}\n255\n`);
 const frameBuf = Buffer.alloc(headerBuf.length + rgb.length);
 function writeFrameAtomic(){
@@ -596,7 +686,6 @@ function writeFrameAtomic(){
 }
 
 let busy=false;
-
 function tick(){
   if(state==="PLAY"){
     const holeCenterDeg = stepPhysics();
@@ -618,7 +707,6 @@ function tick(){
     }
   }
 }
-
 function stepOnce(){
   if(busy) return;
   busy=true;
@@ -627,13 +715,13 @@ function stepOnce(){
   if(ok) busy=false;
   else process.stdout.once('drain', ()=>{ busy=false; });
 }
-
 setInterval(stepOnce, Math.round(1000/FPS));
 JS
 
 URL="rtmps://live.twitch.tv/app/${STREAM_KEY}"
 
 node /tmp/sim.js | ffmpeg -hide_banner -loglevel info -stats \
+  -thread_queue_size 1024 \
   -probesize 50M -analyzeduration 2M \
   -f image2pipe -vcodec ppm -r "$FPS" -i - \
   -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
