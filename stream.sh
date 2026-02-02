@@ -269,22 +269,55 @@ function inHole(angleDeg, holeCenterDeg){
 }
 
 function drawRing(holeCenterDeg){
-  const thickness = Math.max(2, RING_THICKNESS);
+  // thinner + smoother
+  const thickness = Math.max(1.5, (RING_THICKNESS||2) * 0.6);
   const inner = RING_R - thickness;
   const outer = RING_R + thickness;
 
-  for(let deg=0; deg<360; deg+=0.5){
+  // soft white (less harsh)
+  const base = 235;
+
+  // --- AA helpers (local, no global changes needed) ---
+  function clamp01(a){ return a<0?0:(a>1?1:a); }
+  function blendPix(x,y,v,a){
+    if(x<0||y<0||x>=W||y>=H) return;
+    a = clamp01(a);
+    const i=(y*W + x)*3;
+    buf[i  ] = (buf[i  ]*(1-a) + v*a)|0;
+    buf[i+1] = (buf[i+1]*(1-a) + v*a)|0;
+    buf[i+2] = (buf[i+2]*(1-a) + v*a)|0;
+  }
+  function splat(fx,fy,v,a){
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const tx = fx - x0, ty = fy - y0;
+    const w00 = (1-tx)*(1-ty);
+    const w10 = (tx)*(1-ty);
+    const w01 = (1-tx)*(ty);
+    const w11 = (tx)*(ty);
+    blendPix(x0,   y0,   v, a*w00);
+    blendPix(x0+1, y0,   v, a*w10);
+    blendPix(x0,   y0+1, v, a*w01);
+    blendPix(x0+1, y0+1, v, a*w11);
+  }
+  // ----------------------------------------------------
+
+  // smaller step + AA = smooth arc
+  for(let deg=0; deg<360; deg+=0.25){
     if(inHole(deg, holeCenterDeg)) continue;
-    const a=deg*Math.PI/180;
+    const a = deg*Math.PI/180;
     const ca=Math.cos(a), sa=Math.sin(a);
-    for(let rr=inner; rr<=outer; rr++){
-      const x=(CX + ca*rr)|0;
-      const y=(CY + sa*rr)|0;
+
+    // sample across thickness with just a few steps (fast)
+    for(let rr=inner; rr<=outer; rr+=0.6){
       const t=(rr-inner)/(outer-inner);
-      const v=(210 + (1-t)*20)|0;
-      setPix(x,y,v,v,v);
+      const v=(base + (1-t)*10)|0;     // gentle gradient
+      const fx = CX + ca*rr;
+      const fy = CY + sa*rr;
+      splat(fx, fy, v, 0.85);          // alpha controls softness
     }
   }
+}
+
 
   // outline
   for(let deg=0; deg<360; deg+=1){
@@ -495,7 +528,7 @@ function renderPlay(holeCenterDeg){
 function renderWin(){
   fillSolid(8,10,18);
 
-  const title = "WE HAVE A WINNER!";
+  const title = "WE HAVE A WINNER";
 
   drawTextShadow(title,(W/2-textWidth(title,4)/2)|0,(H/2-90)|0,4);
 
