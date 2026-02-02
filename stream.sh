@@ -449,12 +449,52 @@ function drawEntity(e){
 
 // ---- OLD-STYLE UI ----
 function drawTopUI(){
-  drawTextShadow(`ALIVE: ${aliveCount}/${entities.length}`, 14, 12, 2);
-  drawTextShadow(`LAST WIN: ${String(lastWinner).slice(0,18)}`, 14, 38, 1);
-  drawTextShadow(`CHAT: ${String(topChatter).slice(0,18)}`, 14, 52, 1);
-  if(joinQueue.length > 0){
-    drawTextShadow(`QUEUE: ${joinQueue.length}`, 14, 66, 1);
-  }
+  // Clean vertical HUD at top-center (no CHAT line)
+  const aliveTxt = `ALIVE`;
+  const aliveNum = `${aliveCount}/${entities.length}`;
+
+  const lastTxt  = `LAST WIN`;
+  const lastVal  = String(lastWinner).toUpperCase().slice(0,22);
+
+  const queueTxt = `QUEUE`;
+  const queueNum = `${joinQueue.length}`;
+
+  // Layout
+  const topY = 10;
+  const gap  = 6;
+
+  // Use bigger scales -> less “pixelated”
+  const sLabel = 2;
+  const sNum   = 3;
+
+  // panel width based on widest line
+  const w1 = textWidth(aliveTxt, sLabel);
+  const w2 = textWidth(aliveNum, sNum);
+  const w3 = textWidth(lastTxt, sLabel);
+  const w4 = textWidth(lastVal, sLabel);
+  const w5 = textWidth(queueTxt, sLabel);
+  const w6 = textWidth(queueNum, sNum);
+  const maxW = Math.max(w1,w2,w3,w4,w5,w6);
+
+  const x = ((W - maxW)/2)|0;
+  let y = topY;
+
+  // ALIVE label + number
+  drawTextShadow(aliveTxt, x, y, sLabel);
+  y += 7*sLabel + gap;
+  drawTextShadow(aliveNum, x, y, sNum);
+  y += 7*sNum + gap + 2;
+
+  // LAST WIN label + value
+  drawTextShadow(lastTxt, x, y, sLabel);
+  y += 7*sLabel + gap;
+  drawTextShadow(lastVal, x, y, sLabel);
+  y += 7*sLabel + gap + 2;
+
+  // QUEUE label + number
+  drawTextShadow(queueTxt, x, y, sLabel);
+  y += 7*sLabel + gap;
+  drawTextShadow(queueNum, x, y, sNum);
 }
 
 function renderPlay(holeCenterDeg){
