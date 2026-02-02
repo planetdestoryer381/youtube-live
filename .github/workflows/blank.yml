@@ -2,11 +2,17 @@ name: Twitch Physics Ring
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+    - cron: "50 5 * * *"
+    - cron: "40 11 * * *"
+    - cron: "30 17 * * *"
+    - cron: "20 23 * * *"
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 350
 
     steps:
       - uses: actions/checkout@v4
@@ -16,25 +22,25 @@ jobs:
 
       - name: Stream
         env:
-          # 🔴 secrets (private)
           STREAM_KEY: ${{ secrets.STREAM_KEY }}
           TWITCH_OAUTH: ${{ secrets.TWITCH_OAUTH }}
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
 
-          # 🟢 public (safe)
           TWITCH_CHANNEL: countryballer2134
           TWITCH_NICK: countryballer2134
 
-          # game tuning
           FPS: "20"
           W: "854"
           H: "480"
-          BALLS: "200"
           RING_R: "160"
           HOLE_DEG: "70"
           SPIN: "0.9"
           PHYS_MULT: "3"
+
+          # countdown length in seconds: 5h50m = 21000
+          RESTART_SECONDS: "21000"
+
         run: |
           chmod +x stream.sh
           ./stream.sh
