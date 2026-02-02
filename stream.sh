@@ -486,6 +486,7 @@ function drawTopUI(){
   const elapsed = ((Date.now() - startMs)/1000)|0;
   const left = Math.max(0, RESTART_SECONDS - elapsed);
   drawTextShadow(fmtCountdown(left), 14, y + (7*s + 8), 2);
+  drawTextShadow("TYPE ME IN CHAT TO ENTER", 14, y + (7*s + 8) + (7*2 + 6), 2);
 }
 
 function renderPlay(holeCenterDeg){
