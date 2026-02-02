@@ -482,10 +482,8 @@ function renderWin(){
   fillSolid(8,10,18);
 
   const title = "WE HAVE A WINNER!";
-  const sub   = "WOHOO WE HAVE A WINNER HERE";
 
-  drawTextShadow(title, (W/2 - (textWidth(title,2)/2))|0, (H/2 - 90)|0, 2);
-  drawTextShadow(sub,   (W/2 - (textWidth(sub,1)/2))|0,   (H/2 - 65)|0, 1);
+  drawTextShadow(title, (W/2 - (textWidth(title,2)/2))|0, (H/2 - 90)|0, 4);
 
   if(winner){
     const iconX = (W/2)|0;
