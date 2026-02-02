@@ -14,27 +14,17 @@ jobs:
       - name: Install FFmpeg + curl
         run: sudo apt-get update && sudo apt-get install -y ffmpeg curl
 
-      - name: Debug env (safe)
-        env:
-          STREAM_KEY: ${{ secrets.STREAM_KEY }}
-
-          TWITCH_OAUTH: ${{ secrets.TWITCH_OAUTH }}
-          TWITCH_NICK: ${{ secrets.TWITCH_NICK }}
-          TWITCH_CHANNEL: ${{ secrets.TWITCH_CHANNEL }}
-
-          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
-          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
-        run: |
-          echo "[envcheck] STREAM_KEY set? $([ -n "$STREAM_KEY" ] && echo yes || echo no)"
-          echo "[envcheck] TWITCH_OAUTH set? $([ -n "$TWITCH_OAUTH" ] && echo yes || echo no)"
-          echo "[envcheck] TWITCH_NICK set? $([ -n "$TWITCH_NICK" ] && echo yes || echo no)"
-          echo "[envcheck] TWITCH_CHANNEL set? $([ -n "$TWITCH_CHANNEL" ] && echo yes || echo no)"
-          echo "[envcheck] TWITCH_CLIENT_ID set? $([ -n "$TWITCH_CLIENT_ID" ] && echo yes || echo no)"
-          echo "[envcheck] TWITCH_CLIENT_SECRET set? $([ -n "$TWITCH_CLIENT_SECRET" ] && echo yes || echo no)"
-
       - name: Stream
         env:
+          # 🔴 secrets (private)
           STREAM_KEY: ${{ secrets.STREAM_KEY }}
+          TWITCH_OAUTH: ${{ secrets.TWITCH_OAUTH }}
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+
+          # 🟢 public (safe)
+          TWITCH_CHANNEL: countryballer2134
+          TWITCH_NICK: countryballer2134
 
           # game tuning
           FPS: "20"
@@ -44,15 +34,7 @@ jobs:
           RING_R: "160"
           HOLE_DEG: "70"
           SPIN: "0.9"
-
-          # twitch chat (IRC)
-          TWITCH_OAUTH: ${{ secrets.TWITCH_OAUTH }}
-          TWITCH_NICK: ${{ secrets.TWITCH_NICK }}
-          TWITCH_CHANNEL: ${{ secrets.TWITCH_CHANNEL }}
-
-          # twitch helix (avatars)
-          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
-          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          PHYS_MULT: "3"
         run: |
           chmod +x stream.sh
           ./stream.sh
