@@ -21,7 +21,7 @@ export BALL_R="${BALL_R:-14}"
 export RING_R="${RING_R:-160}"
 export HOLE_DEG="${HOLE_DEG:-70}"
 export SPIN="${SPIN:-0.9}"
-export SPEED="${SPEED:-50}"
+export SPEED="${SPEED:-100}"
 export PHYS_MULT="${PHYS_MULT:-3}"
 export WIN_SCREEN_SECONDS="${WIN_SCREEN_SECONDS:-6}"
 
@@ -316,7 +316,7 @@ function inHole(angleDeg, holeCenterDeg){
 
 // draw thick ring with soft-ish edge
 function drawRing(holeCenterDeg){
-  const thickness = 10;
+  const thickness = 4;
   const inner = RING_R - thickness;
   const outer = RING_R + thickness;
 
@@ -357,7 +357,7 @@ function drawRing(holeCenterDeg){
     const ca=Math.cos(a), sa=Math.sin(a);
     for(let rr=inner-2; rr<=outer+2; rr++){
       const x=(CX + ca*rr)|0, y=(CY + sa*rr)|0;
-      setPix(x,y,255,120,40);
+      setPix(x,y,180,90,30);
     }
   }
 }
