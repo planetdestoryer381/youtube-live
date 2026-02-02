@@ -1,19 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ------------------- REQUIRED -------------------
-: "${STREAM_KEY:?Missing STREAM_KEY (GitHub Secret)}"
+# -------- REQUIRED --------
+: "${STREAM_KEY:?Missing STREAM_KEY (set as GitHub Secret)}"
 
-# ------------------- Twitch Chat (optional) -------------------
-: "${TWITCH_OAUTH:=}"
-: "${TWITCH_CHANNEL:=}"
-: "${TWITCH_NICK:=}"
+# -------- Twitch chat (optional but you want it) --------
+: "${TWITCH_OAUTH:=}"     # format: oauth:xxxxxxxxxxxx
+: "${TWITCH_CHANNEL:=}"   # without '#'
+: "${TWITCH_NICK:=}"      # bot/user login
 
-# ------------------- Helix Avatars (optional) -------------------
-: "${TWITCH_CLIENT_ID:=}"
-: "${TWITCH_CLIENT_SECRET:=}"
-
-# ------------------- Video / Game -------------------
+# -------- Game/video settings --------
 export FPS="${FPS:-20}"
 export W="${W:-854}"
 export H="${H:-480}"
@@ -23,39 +19,36 @@ export RING_R="${RING_R:-160}"
 export HOLE_DEG="${HOLE_DEG:-70}"
 export SPIN="${SPIN:-0.9}"
 
-# Your request:
+# your request:
 export SPEED="${SPEED:-100}"
 
 export PHYS_MULT="${PHYS_MULT:-3}"
 export WIN_SCREEN_SECONDS="${WIN_SCREEN_SECONDS:-6}"
 
-# Ring style:
-export RING_THICKNESS="${RING_THICKNESS:-4}"   # thinner ring (try 3-5)
-export RING_HOLE_EDGE="${RING_HOLE_EDGE:-1}"   # 1 = show hole edge highlight
+# ring looks
+export RING_THICKNESS="${RING_THICKNESS:-4}"      # thinner ring
+export RING_HOLE_EDGE="${RING_HOLE_EDGE:-1}"      # 1 show hole edge glow
 
-# Assets
+# assets
 export COUNTRIES_PATH="${COUNTRIES_PATH:-./countries.json}"
 export FLAG_SIZE="${FLAG_SIZE:-26}"
 export FLAGS_DIR="${FLAGS_DIR:-/tmp/flags}"
+mkdir -p "$FLAGS_DIR"
 
-export AVATAR_SIZE="${AVATAR_SIZE:-26}"
-export AVATARS_DIR="${AVATARS_DIR:-/tmp/avatars}"
-
-mkdir -p "$FLAGS_DIR" "$AVATARS_DIR"
+URL="rtmps://live.twitch.tv/app/${STREAM_KEY}"
 
 echo "=== GAME SETTINGS ==="
-echo "FPS=$FPS SIZE=${W}x${H} BALL_R=$BALL_R RING_R=$RING_R THICK=$RING_THICKNESS HOLE_DEG=$HOLE_DEG SPIN=$SPIN SPEED=$SPEED PHYS_MULT=$PHYS_MULT"
-echo "COUNTRIES_PATH=$COUNTRIES_PATH"
-echo "FLAG_SIZE=$FLAG_SIZE FLAGS_DIR=$FLAGS_DIR"
-echo "AVATAR_SIZE=$AVATAR_SIZE AVATARS_DIR=$AVATARS_DIR"
+echo "FPS=$FPS SIZE=${W}x${H} BALL_R=$BALL_R RING_R=$RING_R HOLE_DEG=$HOLE_DEG SPIN=$SPIN SPEED=$SPEED PHYS_MULT=$PHYS_MULT"
+echo "RING_THICKNESS=$RING_THICKNESS RING_HOLE_EDGE=$RING_HOLE_EDGE"
+echo "COUNTRIES_PATH=$COUNTRIES_PATH FLAG_SIZE=$FLAG_SIZE FLAGS_DIR=$FLAGS_DIR"
 echo "WIN_SCREEN_SECONDS=$WIN_SCREEN_SECONDS"
 echo "STREAM_KEY length: ${#STREAM_KEY}"
 echo "TWITCH_CHAT: $([ -n "${TWITCH_OAUTH}" ] && [ -n "${TWITCH_CHANNEL}" ] && [ -n "${TWITCH_NICK}" ] && echo enabled || echo disabled)"
-echo "HELIX_AVATARS: $([ -n "${TWITCH_CLIENT_ID}" ] && [ -n "${TWITCH_CLIENT_SECRET}" ] && echo enabled || echo disabled)"
 node -v
 ffmpeg -version | head -n 2
 echo "====================="
 
+# ---- download + preconvert flags to raw rgb once ----
 download_flag () {
   local iso="$1"
   local size="$2"
@@ -70,14 +63,13 @@ download_flag () {
   ffmpeg -hide_banner -loglevel error -y \
     -i "$png" \
     -vf "scale=${size}:${size}:flags=lanczos" \
-    -f rawvideo -pix_fmt rgb24 "$out_rgb" || true
+    -f rawvideo -pix_fmt rgb24 "$out_rgb" >/dev/null 2>&1 || true
 }
 
 echo "[flags] preparing from $COUNTRIES_PATH ..."
 ISO_LIST="$(grep -oE '"iso2"[[:space:]]*:[[:space:]]*"[^"]+"' "$COUNTRIES_PATH" \
   | sed -E 's/.*"([a-zA-Z]{2})".*/\1/' \
   | tr 'A-Z' 'a-z' | sort -u)"
-
 COUNT=0
 for iso in $ISO_LIST; do
   download_flag "$iso" "$FLAG_SIZE" || true
@@ -85,13 +77,12 @@ for iso in $ISO_LIST; do
 done
 echo "[flags] prepared (iso2 unique): $COUNT"
 
+# ---- node sim ----
 cat > /tmp/sim.js <<'JS'
 'use strict';
 const fs = require('fs');
 const tls = require('tls');
-const { execFile } = require('child_process');
 
-// ---- Important: exit cleanly if ffmpeg closes the pipe ----
 process.stdout.on("error", (e) => {
   if (e && e.code === "EPIPE") {
     console.error("[pipe] ffmpeg closed stdin (EPIPE) - exiting cleanly");
@@ -109,30 +100,23 @@ const HOLE_DEG = +process.env.HOLE_DEG || 70;
 const SPIN     = +process.env.SPIN || 0.9;
 const SPEED    = +process.env.SPEED || 100;
 const PHYS_MULT = +process.env.PHYS_MULT || 3;
-
 const WIN_SECONDS = +process.env.WIN_SCREEN_SECONDS || 6;
 
-const FLAGS_DIR   = process.env.FLAGS_DIR || "/tmp/flags";
-const FLAG_SIZE   = +process.env.FLAG_SIZE || 26;
-
-const AVATARS_DIR = process.env.AVATARS_DIR || "/tmp/avatars";
-const AVATAR_SIZE = +process.env.AVATAR_SIZE || 26;
-
-const COUNTRIES_PATH = process.env.COUNTRIES_PATH || "./countries.json";
 const RING_THICKNESS = +process.env.RING_THICKNESS || 4;
 const RING_HOLE_EDGE = (+process.env.RING_HOLE_EDGE || 0) ? 1 : 0;
+
+const COUNTRIES_PATH = process.env.COUNTRIES_PATH || "./countries.json";
+const FLAGS_DIR = process.env.FLAGS_DIR || "/tmp/flags";
+const FLAG_SIZE = +process.env.FLAG_SIZE || 26;
 
 const TWITCH_OAUTH   = process.env.TWITCH_OAUTH || "";
 const TWITCH_CHANNEL = (process.env.TWITCH_CHANNEL || "").toLowerCase();
 const TWITCH_NICK    = (process.env.TWITCH_NICK || "").toLowerCase();
 
-const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID || "";
-const TWITCH_CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET || "";
-
 const CX = W*0.5, CY = H*0.5;
 const dt = (PHYS_MULT) / FPS;
 
-// framebuffer
+// ---- framebuffer ----
 const rgb = Buffer.alloc(W*H*3);
 function setPix(x,y,r,g,b){
   if(x<0||y<0||x>=W||y>=H) return;
@@ -143,11 +127,11 @@ function fillSolid(r,g,b){
   for(let i=0;i<rgb.length;i+=3){ rgb[i]=r; rgb[i+1]=g; rgb[i+2]=b; }
 }
 function clearBG(){
-  // dark background so white names pop
+  // dark-ish background so white usernames pop
   fillSolid(10,14,28);
 }
 
-// tiny font (minimal)
+// ---- tiny font ----
 const FONT={
   'A':[0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
   'B':[0b11110,0b10001,0b11110,0b10001,0b10001,0b10001,0b11110],
@@ -221,7 +205,7 @@ function drawTextShadow(text,x,y,scale){
   drawText(text, x, y, scale, [255,255,255]);
 }
 
-// sprites
+// ---- sprites ----
 function readRGB(path,size){
   try{
     const buf=fs.readFileSync(path);
@@ -231,7 +215,6 @@ function readRGB(path,size){
 }
 function flagRGB(iso2){ return readRGB(`${FLAGS_DIR}/${iso2}_${FLAG_SIZE}.rgb`, FLAG_SIZE); }
 
-// draw sprite inside circle
 function blitSpriteInCircle(centerX, centerY, radius, spriteBuf, spriteSize){
   if(!spriteBuf) return;
   const half=(spriteSize/2)|0;
@@ -249,7 +232,7 @@ function blitSpriteInCircle(centerX, centerY, radius, spriteBuf, spriteSize){
   }
 }
 
-// colors
+// ---- colors ----
 function hashStr(s){
   s=String(s);
   let h=2166136261>>>0;
@@ -264,12 +247,26 @@ function colorFromName(name){
   return [60+(h&0x7F), 60+((h>>7)&0x7F), 60+((h>>14)&0x7F)];
 }
 
-// ring helpers
+// ---- physics helpers ----
+function normalizeSpeed(b, target){
+  const v = Math.hypot(b.vx, b.vy);
+  if(v < 1e-6){
+    const a = Math.random()*Math.PI*2;
+    b.vx = Math.cos(a)*target;
+    b.vy = Math.sin(a)*target;
+    return;
+  }
+  const s = target / v;
+  b.vx *= s;
+  b.vy *= s;
+}
+
 function inHole(angleDeg, holeCenterDeg){
   const half=HOLE_DEG/2;
   let d=(angleDeg-holeCenterDeg+180)%360-180;
   return Math.abs(d)<=half;
 }
+
 function drawRing(holeCenterDeg){
   const thickness = Math.max(2, RING_THICKNESS);
   const inner = RING_R - thickness;
@@ -279,7 +276,6 @@ function drawRing(holeCenterDeg){
     if(inHole(deg, holeCenterDeg)) continue;
     const a=deg*Math.PI/180;
     const ca=Math.cos(a), sa=Math.sin(a);
-
     for(let rr=inner; rr<=outer; rr++){
       const x=(CX + ca*rr)|0;
       const y=(CY + sa*rr)|0;
@@ -289,15 +285,13 @@ function drawRing(holeCenterDeg){
     }
   }
 
-  // edges
+  // outline
   for(let deg=0; deg<360; deg+=1){
     if(inHole(deg, holeCenterDeg)) continue;
     const a=deg*Math.PI/180;
     const ca=Math.cos(a), sa=Math.sin(a);
-    const x1=(CX + ca*(outer+1))|0, y1=(CY + sa*(outer+1))|0;
-    const x2=(CX + ca*(inner-1))|0, y2=(CY + sa*(inner-1))|0;
-    setPix(x1,y1,35,35,35);
-    setPix(x2,y2,35,35,35);
+    setPix((CX + ca*(outer+1))|0, (CY + sa*(outer+1))|0, 40,40,40);
+    setPix((CX + ca*(inner-1))|0, (CY + sa*(inner-1))|0, 40,40,40);
   }
 
   if(RING_HOLE_EDGE){
@@ -307,14 +301,13 @@ function drawRing(holeCenterDeg){
       const a=edge*Math.PI/180;
       const ca=Math.cos(a), sa=Math.sin(a);
       for(let rr=inner-2; rr<=outer+2; rr++){
-        const x=(CX + ca*rr)|0, y=(CY + sa*rr)|0;
-        setPix(x,y,180,90,30);
+        setPix((CX + ca*rr)|0, (CY + sa*rr)|0, 180, 90, 30);
       }
     }
   }
 }
 
-// countries.json
+// ---- countries ----
 function loadCountries(){
   const raw=fs.readFileSync(COUNTRIES_PATH,"utf8");
   const arr=JSON.parse(raw);
@@ -333,15 +326,19 @@ function loadCountries(){
 const COUNTRIES=loadCountries();
 console.error(`[countries] loaded ${COUNTRIES.length} unique countries from ${COUNTRIES_PATH}`);
 
-// game state
+// ---- game state ----
 let entities=[], alive=[], aliveCount=0;
-let joinedThisRound = new Set();
 let state="PLAY";
 let t=0;
 let winFrames=0;
 let winner=null;
 let lastWinner="none";
 let topChatter="none";
+
+// chat join queue (DOES NOT EXPIRE)
+let joinQueue = [];
+let joinQueued = new Set(); // prevents duplicate queueing this round
+let playerActive = new Set(); // prevents multiple spawns in same round
 
 function aliveCountryCount(){
   let c=0;
@@ -350,24 +347,15 @@ function aliveCountryCount(){
   }
   return c;
 }
-function normalizeSpeed(b, target){
-  const v = Math.hypot(b.vx, b.vy);
-  if(v < 1e-6){
-    const a = Math.random()*Math.PI*2;
-    b.vx = Math.cos(a)*target;
-    b.vy = Math.sin(a)*target;
-    return;
-  }
-  const s = target / v;
-  b.vx *= s;
-  b.vy *= s;
-}
 
 function startRound(){
-  joinedThisRound = new Set();
-  console.error("[round] new round: join list reset");
+  // reset round gameplay, but KEEP joinQueue/joinQueued (your request)
+  playerActive = new Set();
 
   entities=[];
+  alive=[];
+  aliveCount=0;
+
   for(const c of COUNTRIES){
     entities.push({
       type:"country",
@@ -378,12 +366,12 @@ function startRound(){
       baseCol:[45,65,110],
       x:0,y:0,vx:0,vy:0
     });
+    alive.push(true);
   }
-  alive=new Array(entities.length).fill(true);
-  aliveCount=entities.length;
+  aliveCount = entities.length;
 
   // cramped spawn near center
-  const innerR = Math.max(40, RING_R - R - 30);
+  const innerR = Math.max(35, RING_R - R - 35);
   for(let i=0;i<entities.length;i++){
     const e=entities[i];
     const a=Math.random()*Math.PI*2;
@@ -400,10 +388,42 @@ function startRound(){
   state="PLAY";
   t=0;
   winFrames=0;
+
+  console.error(`[round] new round (queue=${joinQueue.length})`);
 }
 startRound();
 
-// draw balls (simple)
+function spawnPlayer(username){
+  username = String(username||"").toLowerCase().trim();
+  if(!username) return false;
+  if(playerActive.has(username)) return false; // already spawned this round
+
+  const innerR = Math.max(30, RING_R - R - 40);
+  const a = Math.random()*Math.PI*2;
+  const rr = Math.random()*innerR;
+  const dir = Math.random()*Math.PI*2;
+
+  entities.push({
+    type:"player",
+    name:username,
+    iso2:null,
+    imageBuf:null,
+    imageSize:0,
+    baseCol:colorFromName(username),
+    x: CX + Math.cos(a)*rr,
+    y: CY + Math.sin(a)*rr,
+    vx: Math.cos(dir)*SPEED,
+    vy: Math.sin(dir)*SPEED,
+  });
+  alive.push(true);
+  aliveCount++;
+  playerActive.add(username);
+
+  console.error(`[join] spawned "${username}" (alive=${aliveCount})`);
+  return true;
+}
+
+// ---- draw balls ----
 const mask=[];
 for(let y=-R;y<=R;y++) for(let x=-R;x<=R;x++) if(x*x+y*y<=R*R) mask.push([x,y]);
 
@@ -412,11 +432,14 @@ function drawBallBase(cx,cy,col){
   const [r,g,b]=col;
   for(const [dx,dy] of mask) setPix(x0+dx,y0+dy,r,g,b);
 }
+
 function drawNameUnderBall(x,y,name){
   const label=String(name).toUpperCase().replace(/[^A-Z0-9_ .:-]/g,' ').trim().slice(0,16);
   const w=textWidth(label,1);
+  // NO white rectangle background (your request). Just shadow + white.
   drawTextShadow(label,(x-w/2)|0,(y+R+6)|0,1);
 }
+
 function drawEntity(e){
   const x=e.x|0, y=e.y|0;
   drawBallBase(x,y,e.baseCol);
@@ -424,18 +447,55 @@ function drawEntity(e){
   drawNameUnderBall(x,y,e.name);
 }
 
-// minimal UI
-function drawTopUI(aliveCount,total){
-  drawTextShadow(`ALIVE ${aliveCount}/${total}`, 12, 12, 2);
-  drawTextShadow(`LAST ${String(lastWinner).slice(0,16)}`, 12, 34, 1);
-  drawTextShadow(`CHAT ${String(topChatter).slice(0,16)}`, 12, 46, 1);
+// ---- OLD-STYLE UI ----
+function drawTopUI(){
+  drawTextShadow(`ALIVE: ${aliveCount}/${entities.length}`, 14, 12, 2);
+  drawTextShadow(`LAST WIN: ${String(lastWinner).slice(0,18)}`, 14, 38, 1);
+  drawTextShadow(`CHAT: ${String(topChatter).slice(0,18)}`, 14, 52, 1);
+  if(joinQueue.length > 0){
+    drawTextShadow(`QUEUE: ${joinQueue.length}`, 14, 66, 1);
+  }
 }
 
+function renderPlay(holeCenterDeg){
+  clearBG();
+  drawTopUI();
+  drawRing(holeCenterDeg);
+  for(let i=0;i<entities.length;i++){
+    if(alive[i]) drawEntity(entities[i]);
+  }
+}
+
+// ---- OLD-STYLE WIN SCREEN ----
+function renderWin(){
+  fillSolid(8,10,18);
+
+  const title = "WE HAVE A WINNER!";
+  const sub   = "WOHOO WE HAVE A WINNER HERE";
+
+  drawTextShadow(title, (W/2 - (textWidth(title,2)/2))|0, (H/2 - 90)|0, 2);
+  drawTextShadow(sub,   (W/2 - (textWidth(sub,1)/2))|0,   (H/2 - 65)|0, 1);
+
+  if(winner){
+    const iconX = (W/2)|0;
+    const iconY = (H/2 - 20)|0;
+
+    drawBallBase(iconX, iconY, [50,70,120]);
+    if(winner.iso2){
+      const buf = flagRGB(winner.iso2);
+      if(buf) blitSpriteInCircle(iconX, iconY, R, buf, FLAG_SIZE);
+    }
+
+    const name = String(winner.name).toUpperCase().slice(0,20);
+    drawTextShadow(name, (W/2 - (textWidth(name,2)/2))|0, (H/2 + 25)|0, 2);
+  }
+}
+
+// ---- physics ----
 function stepPhysics(){
   t += dt;
   const holeCenterDeg = (t*SPIN*180/Math.PI)%360;
 
-  // integrate
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
     const b=entities[i];
@@ -443,7 +503,7 @@ function stepPhysics(){
     b.y += b.vy*dt;
   }
 
-  // naive collisions (good enough for now)
+  // collisions
   const minD=2*R;
   const minD2=minD*minD;
   for(let i=0;i<entities.length;i++){
@@ -462,7 +522,6 @@ function stepPhysics(){
         A.x -= nx*overlap*0.5; A.y -= ny*overlap*0.5;
         B.x += nx*overlap*0.5; B.y += ny*overlap*0.5;
 
-        // exchange normal components
         const van=A.vx*nx + A.vy*ny;
         const vbn=B.vx*nx + B.vy*ny;
         A.vx += (vbn-van)*nx; A.vy += (vbn-van)*ny;
@@ -471,7 +530,7 @@ function stepPhysics(){
     }
   }
 
-  // ring constraint + hole elimination
+  // ring boundary + hole elimination
   const wallR = RING_R - R - 3;
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
@@ -489,14 +548,13 @@ function stepPhysics(){
       b.x = CX + nx*wallR;
       b.y = CY + ny*wallR;
 
-      // reflect
       const vn=b.vx*nx + b.vy*ny;
       b.vx -= 2*vn*nx;
       b.vy -= 2*vn*ny;
     }
   }
 
-  // HARD RULE: fixed speed always
+  // FIXED speed always
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
     normalizeSpeed(entities[i], SPEED);
@@ -510,31 +568,23 @@ function getWinnerIndex(){
   return -1;
 }
 
-function renderPlay(holeCenterDeg){
-  clearBG();
-  drawTopUI(aliveCount, entities.length);
-  drawRing(holeCenterDeg);
-  for(let i=0;i<entities.length;i++){
-    if(alive[i]) drawEntity(entities[i]);
-  }
-}
-function renderWin(){
-  fillSolid(6,8,16);
-  drawTextShadow("WOHOO WE HAVE A WINNER HERE", (W/2 - 160)|0, (H/2 - 30)|0, 2);
-  if(winner){
-    drawTextShadow(String(winner.name).slice(0,20), (W/2 - 120)|0, (H/2 + 10)|0, 2);
-  }
-  drawTextShadow("NEXT ROUND STARTING...", (W/2 - 140)|0, (H/2 + 40)|0, 2);
-}
-
 function tick(){
   if(state==="PLAY"){
-    const holeCenterDeg=stepPhysics();
+    // spawn queued players ONLY when <10 countries alive
+    while(aliveCountryCount() < 10 && joinQueue.length > 0){
+      const u = joinQueue.shift();
+      // allow re-queue next round by removing from joinQueued only when spawned
+      joinQueued.delete(u);
+      spawnPlayer(u);
+    }
+
+    const holeCenterDeg = stepPhysics();
+
     if(aliveCount<=1){
       const wi=getWinnerIndex();
       const e=wi>=0?entities[wi]:null;
-      winner=e?{name:e.name}:null;
-      lastWinner=winner?winner.name:"none";
+      winner = e ? { name: e.name, iso2: e.iso2 || null } : null;
+      lastWinner = winner ? winner.name : "none";
       state="WIN";
       winFrames=0;
       renderWin();
@@ -550,9 +600,10 @@ function tick(){
   }
 }
 
-// PPM output (single buffer)
+// ---- PPM output ----
 const headerBuf=Buffer.from(`P6\n${W} ${H}\n255\n`);
 const frameBuf=Buffer.alloc(headerBuf.length + rgb.length);
+
 function writeFrame(){
   headerBuf.copy(frameBuf,0);
   rgb.copy(frameBuf,headerBuf.length);
@@ -569,7 +620,7 @@ setInterval(()=>{
   writeFrame();
 }, Math.round(1000/FPS));
 
-// Twitch chat (kept minimal; you already had it working)
+// ---- twitch chat ----
 function startTwitchChat(){
   if(!TWITCH_OAUTH || !TWITCH_CHANNEL || !TWITCH_NICK){
     console.error("[chat] disabled (missing TWITCH_OAUTH/TWITCH_CHANNEL/TWITCH_NICK)");
@@ -577,7 +628,7 @@ function startTwitchChat(){
   }
 
   const sock=tls.connect(6697,'irc.chat.twitch.tv',{rejectUnauthorized:false},()=>{
-    console.error(`[chat] connecting as nick="${TWITCH_NICK}" channel="#${TWITCH_CHANNEL}" oauth_len=${TWITCH_OAUTH.length}`);
+    console.error(`[chat] connecting nick="${TWITCH_NICK}" channel="#${TWITCH_CHANNEL}" oauth_len=${TWITCH_OAUTH.length}`);
     sock.write(`PASS ${TWITCH_OAUTH}\r\n`);
     sock.write(`NICK ${TWITCH_NICK}\r\n`);
     sock.write(`CAP REQ :twitch.tv/tags\r\n`);
@@ -591,8 +642,10 @@ function startTwitchChat(){
     while((idx=acc.indexOf('\r\n'))>=0){
       let line=acc.slice(0,idx); acc=acc.slice(idx+2);
       if(printed<12){ console.error("[chat:raw]", line); printed++; }
+
       if(line.startsWith('PING')){ sock.write('PONG :tmi.twitch.tv\r\n'); continue; }
 
+      // strip tags
       if(line[0]==='@'){
         const sp=line.indexOf(' ');
         if(sp>0) line=line.slice(sp+1);
@@ -604,6 +657,16 @@ function startTwitchChat(){
         const msg=m[2].trim();
         console.error(`[chat:msg] ${user}: ${msg}`);
         topChatter=user;
+
+        if(msg.toLowerCase()==="me"){
+          if(joinQueued.has(user)){
+            console.error(`[join] ${user} already queued (ignored)`);
+          }else{
+            joinQueued.add(user);
+            joinQueue.push(user);
+            console.error(`[join] queued ${user} (queue=${joinQueue.length})`);
+          }
+        }
       }
     }
   });
@@ -614,10 +677,7 @@ function startTwitchChat(){
 startTwitchChat();
 JS
 
-URL="rtmps://live.twitch.tv/app/${STREAM_KEY}"
-
-# ------------------- STREAM LOOP (auto-reconnect) -------------------
-# If Twitch drops, ffmpeg exits -> node exits cleanly (EPIPE handler) -> loop restarts.
+# ---- stream loop (auto reconnect) ----
 set +e
 while true; do
   echo "[stream] starting node -> ffmpeg ..."
