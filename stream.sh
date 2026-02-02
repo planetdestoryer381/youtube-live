@@ -269,23 +269,23 @@ function inHole(angleDeg, holeCenterDeg){
 }
 
 function drawRing(holeCenterDeg){
-  // thinner + smoother
-  const thickness = Math.max(1.5, (RING_THICKNESS||2) * 0.6);
+  // Smooth anti-aliased ring (thin + easy on eyes)
+  const thickness = Math.max(1.5, (RING_THICKNESS||4) * 0.55);
   const inner = RING_R - thickness;
   const outer = RING_R + thickness;
 
-  // soft white (less harsh)
-  const base = 235;
+  // slightly off-white ring, softer than pure white
+  const base = 228;
 
-  // --- AA helpers (local, no global changes needed) ---
+  // AA helpers using YOUR framebuffer "rgb"
   function clamp01(a){ return a<0?0:(a>1?1:a); }
   function blendPix(x,y,v,a){
     if(x<0||y<0||x>=W||y>=H) return;
     a = clamp01(a);
     const i=(y*W + x)*3;
-    buf[i  ] = (buf[i  ]*(1-a) + v*a)|0;
-    buf[i+1] = (buf[i+1]*(1-a) + v*a)|0;
-    buf[i+2] = (buf[i+2]*(1-a) + v*a)|0;
+    rgb[i  ] = (rgb[i  ]*(1-a) + v*a)|0;
+    rgb[i+1] = (rgb[i+1]*(1-a) + v*a)|0;
+    rgb[i+2] = (rgb[i+2]*(1-a) + v*a)|0;
   }
   function splat(fx,fy,v,a){
     const x0 = Math.floor(fx), y0 = Math.floor(fy);
@@ -299,24 +299,45 @@ function drawRing(holeCenterDeg){
     blendPix(x0,   y0+1, v, a*w01);
     blendPix(x0+1, y0+1, v, a*w11);
   }
-  // ----------------------------------------------------
 
-  // smaller step + AA = smooth arc
-  for(let deg=0; deg<360; deg+=0.25){
+  // ring body (smooth)
+  for(let deg=0; deg<360; deg+=0.22){
     if(inHole(deg, holeCenterDeg)) continue;
     const a = deg*Math.PI/180;
     const ca=Math.cos(a), sa=Math.sin(a);
 
-    // sample across thickness with just a few steps (fast)
-    for(let rr=inner; rr<=outer; rr+=0.6){
+    // fill across thickness with a few samples
+    for(let rr=inner; rr<=outer; rr+=0.45){
       const t=(rr-inner)/(outer-inner);
-      const v=(base + (1-t)*10)|0;     // gentle gradient
-      const fx = CX + ca*rr;
-      const fy = CY + sa*rr;
-      splat(fx, fy, v, 0.85);          // alpha controls softness
+      const v=(base + (1-t)*12)|0;
+      splat(CX + ca*rr, CY + sa*rr, v, 0.70);
+    }
+  }
+
+  // subtle dark outline (still AA)
+  const outlineV = 35;
+  for(let deg=0; deg<360; deg+=0.8){
+    if(inHole(deg, holeCenterDeg)) continue;
+    const a = deg*Math.PI/180;
+    const ca=Math.cos(a), sa=Math.sin(a);
+    splat(CX + ca*(outer+1.0), CY + sa*(outer+1.0), outlineV, 0.55);
+    splat(CX + ca*(inner-1.0), CY + sa*(inner-1.0), outlineV, 0.55);
+  }
+
+  // optional hole edge glow
+  if(RING_HOLE_EDGE){
+    const edgeA = (holeCenterDeg - HOLE_DEG/2);
+    const edgeB = (holeCenterDeg + HOLE_DEG/2);
+    for(const edge of [edgeA, edgeB]){
+      const a=edge*Math.PI/180;
+      const ca=Math.cos(a), sa=Math.sin(a);
+      for(let rr=inner-2; rr<=outer+2; rr+=0.6){
+        splat(CX + ca*rr, CY + sa*rr, 200, 0.40); // warm glow
+      }
     }
   }
 }
+
 
 
   // outline
@@ -509,7 +530,7 @@ function drawTopUI(){
 
   // countdown line (below)
   const elapsed = ((Date.now() - startMs)/1000)|0;
-  const left = RESTART_SECONDS - elapsed;
+  const left = Math.max(0, RESTART_SECONDS - elapsed);
   drawTextShadow(fmtCountdown(left), 14, y + (7*s + 8), 2);
 }
 
