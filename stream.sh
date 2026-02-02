@@ -1,35 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# -------- REQUIRED --------
 : "${STREAM_KEY:?Missing STREAM_KEY (set as GitHub Secret)}"
 
-# -------- Twitch chat (optional but you want it) --------
-: "${TWITCH_OAUTH:=}"     # format: oauth:xxxxxxxxxxxx
+: "${TWITCH_OAUTH:=}"     # oauth:xxxxx
 : "${TWITCH_CHANNEL:=}"   # without '#'
-: "${TWITCH_NICK:=}"      # bot/user login
+: "${TWITCH_NICK:=}"      # login
 
-# -------- Game/video settings --------
 export FPS="${FPS:-20}"
 export W="${W:-854}"
 export H="${H:-480}"
 export RESTART_SECONDS="${RESTART_SECONDS:-21000}"
+
 export BALL_R="${BALL_R:-14}"
 export RING_R="${RING_R:-160}"
 export HOLE_DEG="${HOLE_DEG:-70}"
 export SPIN="${SPIN:-0.9}"
-
-# your request:
 export SPEED="${SPEED:-100}"
-
 export PHYS_MULT="${PHYS_MULT:-3}"
 export WIN_SCREEN_SECONDS="${WIN_SCREEN_SECONDS:-6}"
 
-# ring looks
-export RING_THICKNESS="${RING_THICKNESS:-4}"      # thinner ring
-export RING_HOLE_EDGE="${RING_HOLE_EDGE:-1}"      # 1 show hole edge glow
+export RING_THICKNESS="${RING_THICKNESS:-4}"
+export RING_HOLE_EDGE="${RING_HOLE_EDGE:-1}"
 
-# assets
 export COUNTRIES_PATH="${COUNTRIES_PATH:-./countries.json}"
 export FLAG_SIZE="${FLAG_SIZE:-26}"
 export FLAGS_DIR="${FLAGS_DIR:-/tmp/flags}"
@@ -39,16 +32,14 @@ URL="rtmps://live.twitch.tv/app/${STREAM_KEY}"
 
 echo "=== GAME SETTINGS ==="
 echo "FPS=$FPS SIZE=${W}x${H} BALL_R=$BALL_R RING_R=$RING_R HOLE_DEG=$HOLE_DEG SPIN=$SPIN SPEED=$SPEED PHYS_MULT=$PHYS_MULT"
+echo "RESTART_SECONDS=$RESTART_SECONDS WIN_SCREEN_SECONDS=$WIN_SCREEN_SECONDS"
 echo "RING_THICKNESS=$RING_THICKNESS RING_HOLE_EDGE=$RING_HOLE_EDGE"
 echo "COUNTRIES_PATH=$COUNTRIES_PATH FLAG_SIZE=$FLAG_SIZE FLAGS_DIR=$FLAGS_DIR"
-echo "WIN_SCREEN_SECONDS=$WIN_SCREEN_SECONDS"
-echo "STREAM_KEY length: ${#STREAM_KEY}"
 echo "TWITCH_CHAT: $([ -n "${TWITCH_OAUTH}" ] && [ -n "${TWITCH_CHANNEL}" ] && [ -n "${TWITCH_NICK}" ] && echo enabled || echo disabled)"
 node -v
 ffmpeg -version | head -n 2
 echo "====================="
 
-# ---- download + preconvert flags to raw rgb once ----
 download_flag () {
   local iso="$1"
   local size="$2"
@@ -77,7 +68,6 @@ for iso in $ISO_LIST; do
 done
 echo "[flags] prepared (iso2 unique): $COUNT"
 
-# ---- node sim ----
 cat > /tmp/sim.js <<'JS'
 'use strict';
 const fs = require('fs');
@@ -103,6 +93,7 @@ const PHYS_MULT = +process.env.PHYS_MULT || 3;
 const WIN_SECONDS = +process.env.WIN_SCREEN_SECONDS || 6;
 const RESTART_SECONDS = +process.env.RESTART_SECONDS || 21000;
 const startMs = Date.now();
+
 const RING_THICKNESS = +process.env.RING_THICKNESS || 4;
 const RING_HOLE_EDGE = (+process.env.RING_HOLE_EDGE || 0) ? 1 : 0;
 
@@ -117,7 +108,7 @@ const TWITCH_NICK    = (process.env.TWITCH_NICK || "").toLowerCase();
 const CX = W*0.5, CY = H*0.5;
 const dt = (PHYS_MULT) / FPS;
 
-// ---- framebuffer ----
+// framebuffer
 const rgb = Buffer.alloc(W*H*3);
 function setPix(x,y,r,g,b){
   if(x<0||y<0||x>=W||y>=H) return;
@@ -128,11 +119,10 @@ function fillSolid(r,g,b){
   for(let i=0;i<rgb.length;i+=3){ rgb[i]=r; rgb[i+1]=g; rgb[i+2]=b; }
 }
 function clearBG(){
-  // dark-ish background so white usernames pop
-  fillSolid(10,14,28);
+  fillSolid(10,14,28); // dark so white text pops
 }
 
-// ---- tiny font ----
+// tiny font
 const FONT={
   'A':[0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
   'B':[0b11110,0b10001,0b11110,0b10001,0b10001,0b10001,0b11110],
@@ -206,7 +196,7 @@ function drawTextShadow(text,x,y,scale){
   drawText(text, x, y, scale, [255,255,255]);
 }
 
-// ---- sprites ----
+// sprites
 function readRGB(path,size){
   try{
     const buf=fs.readFileSync(path);
@@ -215,7 +205,6 @@ function readRGB(path,size){
   return null;
 }
 function flagRGB(iso2){ return readRGB(`${FLAGS_DIR}/${iso2}_${FLAG_SIZE}.rgb`, FLAG_SIZE); }
-
 function blitSpriteInCircle(centerX, centerY, radius, spriteBuf, spriteSize){
   if(!spriteBuf) return;
   const half=(spriteSize/2)|0;
@@ -233,7 +222,7 @@ function blitSpriteInCircle(centerX, centerY, radius, spriteBuf, spriteSize){
   }
 }
 
-// ---- colors ----
+// colors
 function hashStr(s){
   s=String(s);
   let h=2166136261>>>0;
@@ -248,7 +237,7 @@ function colorFromName(name){
   return [60+(h&0x7F), 60+((h>>7)&0x7F), 60+((h>>14)&0x7F)];
 }
 
-// ---- physics helpers ----
+// physics helpers
 function normalizeSpeed(b, target){
   const v = Math.hypot(b.vx, b.vy);
   if(v < 1e-6){
@@ -261,23 +250,19 @@ function normalizeSpeed(b, target){
   b.vx *= s;
   b.vy *= s;
 }
-
 function inHole(angleDeg, holeCenterDeg){
   const half=HOLE_DEG/2;
   let d=(angleDeg-holeCenterDeg+180)%360-180;
   return Math.abs(d)<=half;
 }
 
+// smooth ring
 function drawRing(holeCenterDeg){
-  // Smooth anti-aliased ring (thin + easy on eyes)
   const thickness = Math.max(1.5, (RING_THICKNESS||4) * 0.55);
   const inner = RING_R - thickness;
   const outer = RING_R + thickness;
-
-  // slightly off-white ring, softer than pure white
   const base = 228;
 
-  // AA helpers using YOUR framebuffer "rgb"
   function clamp01(a){ return a<0?0:(a>1?1:a); }
   function blendPix(x,y,v,a){
     if(x<0||y<0||x>=W||y>=H) return;
@@ -300,21 +285,19 @@ function drawRing(holeCenterDeg){
     blendPix(x0+1, y0+1, v, a*w11);
   }
 
-  // ring body (smooth)
+  // body
   for(let deg=0; deg<360; deg+=0.22){
     if(inHole(deg, holeCenterDeg)) continue;
     const a = deg*Math.PI/180;
     const ca=Math.cos(a), sa=Math.sin(a);
-
-    // fill across thickness with a few samples
-    for(let rr=inner; rr<=outer; rr+=0.45){
+    for(let rr=inner; rr<=outer; rr+=0.55){
       const t=(rr-inner)/(outer-inner);
       const v=(base + (1-t)*12)|0;
-      splat(CX + ca*rr, CY + sa*rr, v, 0.70);
+      splat(CX + ca*rr, CY + sa*rr, v, 0.80);
     }
   }
 
-  // subtle dark outline (still AA)
+  // subtle outline
   const outlineV = 35;
   for(let deg=0; deg<360; deg+=0.8){
     if(inHole(deg, holeCenterDeg)) continue;
@@ -324,7 +307,7 @@ function drawRing(holeCenterDeg){
     splat(CX + ca*(inner-1.0), CY + sa*(inner-1.0), outlineV, 0.55);
   }
 
-  // optional hole edge glow
+  // hole glow
   if(RING_HOLE_EDGE){
     const edgeA = (holeCenterDeg - HOLE_DEG/2);
     const edgeB = (holeCenterDeg + HOLE_DEG/2);
@@ -332,37 +315,13 @@ function drawRing(holeCenterDeg){
       const a=edge*Math.PI/180;
       const ca=Math.cos(a), sa=Math.sin(a);
       for(let rr=inner-2; rr<=outer+2; rr+=0.6){
-        splat(CX + ca*rr, CY + sa*rr, 200, 0.40); // warm glow
+        splat(CX + ca*rr, CY + sa*rr, 200, 0.40);
       }
     }
   }
 }
 
-
-
-  // outline
-  for(let deg=0; deg<360; deg+=1){
-    if(inHole(deg, holeCenterDeg)) continue;
-    const a=deg*Math.PI/180;
-    const ca=Math.cos(a), sa=Math.sin(a);
-    setPix((CX + ca*(outer+1))|0, (CY + sa*(outer+1))|0, 40,40,40);
-    setPix((CX + ca*(inner-1))|0, (CY + sa*(inner-1))|0, 40,40,40);
-  }
-
-  if(RING_HOLE_EDGE){
-    const edgeA = (holeCenterDeg - HOLE_DEG/2);
-    const edgeB = (holeCenterDeg + HOLE_DEG/2);
-    for(const edge of [edgeA, edgeB]){
-      const a=edge*Math.PI/180;
-      const ca=Math.cos(a), sa=Math.sin(a);
-      for(let rr=inner-2; rr<=outer+2; rr++){
-        setPix((CX + ca*rr)|0, (CY + sa*rr)|0, 180, 90, 30);
-      }
-    }
-  }
-}
-
-// ---- countries ----
+// countries
 function loadCountries(){
   const raw=fs.readFileSync(COUNTRIES_PATH,"utf8");
   const arr=JSON.parse(raw);
@@ -381,7 +340,6 @@ function loadCountries(){
 const COUNTRIES=loadCountries();
 console.error(`[countries] loaded ${COUNTRIES.length} unique countries from ${COUNTRIES_PATH}`);
 
-// ---- game state ----
 function fmtCountdown(sec){
   sec = Math.max(0, sec|0);
   const h = (sec/3600)|0;
@@ -390,18 +348,18 @@ function fmtCountdown(sec){
   return `${h} hours ${m} minutes ${s} seconds till stream restarts`;
 }
 
+// game state
 let entities=[], alive=[], aliveCount=0;
 let state="PLAY";
 let t=0;
 let winFrames=0;
 let winner=null;
 let lastWinner="none";
-let topChatter="none";
 
-// chat join queue (DOES NOT EXPIRE)
+// chat join queue (persist)
 let joinQueue = [];
-let joinQueued = new Set(); // prevents duplicate queueing this round
-let playerActive = new Set(); // prevents multiple spawns in same round
+let joinQueued = new Set();
+let playerActive = new Set();
 
 function aliveCountryCount(){
   let c=0;
@@ -412,7 +370,6 @@ function aliveCountryCount(){
 }
 
 function startRound(){
-  // reset round gameplay, but KEEP joinQueue/joinQueued (your request)
   playerActive = new Set();
 
   entities=[];
@@ -433,7 +390,6 @@ function startRound(){
   }
   aliveCount = entities.length;
 
-  // cramped spawn near center
   const innerR = Math.max(35, RING_R - R - 35);
   for(let i=0;i<entities.length;i++){
     const e=entities[i];
@@ -459,7 +415,7 @@ startRound();
 function spawnPlayer(username){
   username = String(username||"").toLowerCase().trim();
   if(!username) return false;
-  if(playerActive.has(username)) return false; // already spawned this round
+  if(playerActive.has(username)) return false;
 
   const innerR = Math.max(30, RING_R - R - 40);
   const a = Math.random()*Math.PI*2;
@@ -486,7 +442,7 @@ function spawnPlayer(username){
   return true;
 }
 
-// ---- draw balls ----
+// draw ball
 const mask=[];
 for(let y=-R;y<=R;y++) for(let x=-R;x<=R;x++) if(x*x+y*y<=R*R) mask.push([x,y]);
 
@@ -499,7 +455,6 @@ function drawBallBase(cx,cy,col){
 function drawNameUnderBall(x,y,name){
   const label=String(name).toUpperCase().replace(/[^A-Z0-9_ .:-]/g,' ').trim().slice(0,16);
   const w=textWidth(label,1);
-  // NO white rectangle background (your request). Just shadow + white.
   drawTextShadow(label,(x-w/2)|0,(y+R+6)|0,1);
 }
 
@@ -510,7 +465,7 @@ function drawEntity(e){
   drawNameUnderBall(x,y,e.name);
 }
 
-// ---- OLD-STYLE UI ----
+// UI
 function drawTopUI(){
   const s = 2;
   const y = 10;
@@ -528,13 +483,10 @@ function drawTopUI(){
 
   drawTextShadow(queueTxt, x, y, s);
 
-  // countdown line (below)
   const elapsed = ((Date.now() - startMs)/1000)|0;
   const left = Math.max(0, RESTART_SECONDS - elapsed);
   drawTextShadow(fmtCountdown(left), 14, y + (7*s + 8), 2);
 }
-
-
 
 function renderPlay(holeCenterDeg){
   clearBG();
@@ -545,12 +497,10 @@ function renderPlay(holeCenterDeg){
   }
 }
 
-// ---- OLD-STYLE WIN SCREEN ----
+// win screen (old)
 function renderWin(){
   fillSolid(8,10,18);
-
   const title = "WE HAVE A WINNER";
-
   drawTextShadow(title,(W/2-textWidth(title,4)/2)|0,(H/2-90)|0,4);
 
   if(winner){
@@ -562,13 +512,12 @@ function renderWin(){
       const buf = flagRGB(winner.iso2);
       if(buf) blitSpriteInCircle(iconX, iconY, R, buf, FLAG_SIZE);
     }
-
     const name = String(winner.name).toUpperCase().slice(0,20);
     drawTextShadow(name, (W/2 - (textWidth(name,2)/2))|0, (H/2 + 25)|0, 2);
   }
 }
 
-// ---- physics ----
+// physics
 function stepPhysics(){
   t += dt;
   const holeCenterDeg = (t*SPIN*180/Math.PI)%360;
@@ -580,7 +529,6 @@ function stepPhysics(){
     b.y += b.vy*dt;
   }
 
-  // collisions
   const minD=2*R;
   const minD2=minD*minD;
   for(let i=0;i<entities.length;i++){
@@ -607,7 +555,6 @@ function stepPhysics(){
     }
   }
 
-  // ring boundary + hole elimination
   const wallR = RING_R - R - 3;
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
@@ -631,7 +578,6 @@ function stepPhysics(){
     }
   }
 
-  // FIXED speed always
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
     normalizeSpeed(entities[i], SPEED);
@@ -646,12 +592,9 @@ function getWinnerIndex(){
 }
 
 function tick(){
-
   if(state==="PLAY"){
-    // spawn queued players ONLY when <10 countries alive
     while(aliveCountryCount() < 10 && joinQueue.length > 0){
       const u = joinQueue.shift();
-      // allow re-queue next round by removing from joinQueued only when spawned
       joinQueued.delete(u);
       spawnPlayer(u);
     }
@@ -678,7 +621,7 @@ function tick(){
   }
 }
 
-// ---- PPM output ----
+// PPM output
 const headerBuf=Buffer.from(`P6\n${W} ${H}\n255\n`);
 const frameBuf=Buffer.alloc(headerBuf.length + rgb.length);
 
@@ -688,7 +631,7 @@ function writeFrame(){
   process.stdout.write(frameBuf);
 }
 
-// boot frame so ffmpeg detects size
+// boot frame
 clearBG();
 drawTextShadow("BOOTING...", (W/2 - 70)|0, (H/2)|0, 3);
 writeFrame();
@@ -698,7 +641,7 @@ setInterval(()=>{
   writeFrame();
 }, Math.round(1000/FPS));
 
-// ---- twitch chat ----
+// twitch chat
 function startTwitchChat(){
   if(!TWITCH_OAUTH || !TWITCH_CHANNEL || !TWITCH_NICK){
     console.error("[chat] disabled (missing TWITCH_OAUTH/TWITCH_CHANNEL/TWITCH_NICK)");
@@ -723,7 +666,6 @@ function startTwitchChat(){
 
       if(line.startsWith('PING')){ sock.write('PONG :tmi.twitch.tv\r\n'); continue; }
 
-      // strip tags
       if(line[0]==='@'){
         const sp=line.indexOf(' ');
         if(sp>0) line=line.slice(sp+1);
@@ -734,7 +676,6 @@ function startTwitchChat(){
         const user=m[1].toLowerCase();
         const msg=m[2].trim();
         console.error(`[chat:msg] ${user}: ${msg}`);
-        topChatter=user;
 
         if(msg.toLowerCase()==="me"){
           if(joinQueued.has(user)){
@@ -755,7 +696,10 @@ function startTwitchChat(){
 startTwitchChat();
 JS
 
-# ---- stream loop (auto reconnect) ----
+# hard stop if JS is broken
+node -c /tmp/sim.js
+echo "[sim] syntax OK"
+
 set +e
 while true; do
   echo "[stream] starting node -> ffmpeg ..."
