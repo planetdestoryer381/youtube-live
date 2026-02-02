@@ -483,7 +483,7 @@ function renderWin(){
 
   const title = "WE HAVE A WINNER!";
 
-  drawTextShadow(title, (W/2 - (textWidth(title,2)/2))|0, (H/2 - 90)|0, 4);
+  drawTextShadow(title,(W/2-textWidth(title,4)/2)|0,(H/2-90)|0,4);
 
   if(winner){
     const iconX = (W/2)|0;
