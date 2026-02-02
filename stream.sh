@@ -7,39 +7,46 @@ set -euo pipefail
 : "${TWITCH_CHANNEL:=}"
 : "${TWITCH_NICK:=}"
 
+: "${TWITCH_CLIENT_ID:=}"
+: "${TWITCH_CLIENT_SECRET:=}"
+
 export FPS="${FPS:-15}"
 export W="${W:-854}"
 export H="${H:-480}"
 
-export BALLS="${BALLS:-200}"
+# IMPORTANT: number of country balls = countries.json length (not BALLS)
 export BALL_R="${BALL_R:-14}"
 export RING_R="${RING_R:-125}"
 export HOLE_DEG="${HOLE_DEG:-90}"
 export SPIN="${SPIN:-1.2}"
 export SPEED="${SPEED:-255}"
 export PHYS_MULT="${PHYS_MULT:-3}"
-
 export WIN_SCREEN_SECONDS="${WIN_SCREEN_SECONDS:-6}"
 
-# Flag sprite settings
-export FLAG_SIZE="${FLAG_SIZE:-24}"           # 24x24 flag on each ball
-export FLAGS_DIR="${FLAGS_DIR:-/tmp/flags}"   # cached between steps of same run
+# Sprites
+export FLAG_SIZE="${FLAG_SIZE:-24}"
+export AVATAR_SIZE="${AVATAR_SIZE:-24}"
+export FLAGS_DIR="${FLAGS_DIR:-/tmp/flags}"
+export AVATARS_DIR="${AVATARS_DIR:-/tmp/avatars}"
+export COUNTRIES_PATH="${COUNTRIES_PATH:-./countries.json}"
 
 echo "=== GAME SETTINGS ==="
-echo "FPS=$FPS SIZE=${W}x${H} BALLS=$BALLS BALL_R=$BALL_R RING_R=$RING_R HOLE_DEG=$HOLE_DEG SPIN=$SPIN SPEED=$SPEED PHYS_MULT=$PHYS_MULT"
+echo "FPS=$FPS SIZE=${W}x${H} BALL_R=$BALL_R RING_R=$RING_R HOLE_DEG=$HOLE_DEG SPIN=$SPIN SPEED=$SPEED PHYS_MULT=$PHYS_MULT"
+echo "COUNTRIES_PATH=$COUNTRIES_PATH"
 echo "FLAG_SIZE=$FLAG_SIZE FLAGS_DIR=$FLAGS_DIR"
+echo "AVATAR_SIZE=$AVATAR_SIZE AVATARS_DIR=$AVATARS_DIR"
 echo "WIN_SCREEN_SECONDS=$WIN_SCREEN_SECONDS"
 echo "STREAM_KEY length: ${#STREAM_KEY}"
 echo "TWITCH_CHAT: $([ -n "${TWITCH_OAUTH}" ] && [ -n "${TWITCH_CHANNEL}" ] && [ -n "${TWITCH_NICK}" ] && echo enabled || echo disabled)"
+echo "HELIX_AVATARS: $([ -n "${TWITCH_CLIENT_ID}" ] && [ -n "${TWITCH_CLIENT_SECRET}" ] && echo enabled || echo disabled)"
 node -v
 ffmpeg -version | head -n 2
 echo "====================="
 
-mkdir -p "$FLAGS_DIR"
+mkdir -p "$FLAGS_DIR" "$AVATARS_DIR"
 
-# ---- Download + convert flags to raw RGB using ffmpeg (no node image libs needed)
-# Flag source: flagcdn (simple stable URLs). If you later want identical assets, we can commit them instead.
-# NOTE: only countries listed in the map get real flags; others fall back to colored circles.
+# --- Prepare flags for all countries in countries.json (cached) ---
+# Uses flagcdn: https://flagcdn.com/w80/{iso2}.png
 download_flag () {
   local iso="$1"
   local size="$2"
@@ -51,72 +58,37 @@ download_flag () {
 
   local png="$FLAGS_DIR/${iso}.png"
 
-  # 1) download if missing
   if [ ! -s "$png" ]; then
-    # flagcdn uses lowercase iso2
     curl -fsSL "https://flagcdn.com/w80/${iso}.png" -o "$png" || return 0
   fi
 
-  # 2) convert PNG -> raw RGB bytes (size x size x 3)
   ffmpeg -hide_banner -loglevel error -y \
     -i "$png" \
     -vf "scale=${size}:${size}:flags=lanczos" \
     -f rawvideo -pix_fmt rgb24 "$out_rgb" || true
 }
 
-# Minimal country->ISO2 mapping for flags.
-# We can expand to 200 countries later (or auto-load a full list file).
-declare -A ISO_MAP=(
-  ["EGYPT"]="eg"
-  ["QATAR"]="qa"
-  ["SAUDI ARABIA"]="sa"
-  ["UAE"]="ae"
-  ["OMAN"]="om"
-  ["TUNISIA"]="tn"
-  ["MOROCCO"]="ma"
-  ["ALGERIA"]="dz"
-  ["JORDAN"]="jo"
-  ["LEBANON"]="lb"
-  ["UNITED STATES"]="us"
-  ["UNITED KINGDOM"]="gb"
-  ["FRANCE"]="fr"
-  ["GERMANY"]="de"
-  ["SPAIN"]="es"
-  ["ITALY"]="it"
-  ["CANADA"]="ca"
-  ["BRAZIL"]="br"
-  ["ARGENTINA"]="ar"
-  ["CHINA"]="cn"
-  ["INDIA"]="in"
-  ["JAPAN"]="jp"
-  ["KOREA"]="kr"
-  ["TURKIYE"]="tr"
-  ["RUSSIA"]="ru"
-  ["UKRAINE"]="ua"
-  ["POLAND"]="pl"
-  ["NETHERLANDS"]="nl"
-  ["SWEDEN"]="se"
-  ["NORWAY"]="no"
-)
-
-# Download flags once at startup (fast)
-echo "[flags] preparing..."
-for name in "${!ISO_MAP[@]}"; do
-  iso="${ISO_MAP[$name]}"
+echo "[flags] preparing from $COUNTRIES_PATH ..."
+# Extract iso2 values without jq (runner safe)
+# NOTE: This expects iso2 values are quoted "iso2": "xx"
+ISO_LIST="$(grep -oE '"iso2"[[:space:]]*:[[:space:]]*"[^"]+"' "$COUNTRIES_PATH" | sed -E 's/.*"([a-zA-Z]{2})".*/\1/' | tr 'A-Z' 'a-z' | sort -u)"
+COUNT=0
+for iso in $ISO_LIST; do
   download_flag "$iso" "$FLAG_SIZE" || true
+  COUNT=$((COUNT+1))
 done
-echo "[flags] done."
+echo "[flags] prepared (iso2 unique): $COUNT"
 
 cat > /tmp/sim.js <<'JS'
 'use strict';
 const fs = require('fs');
 const tls = require('tls');
+const { execFile } = require('child_process');
 
 const FPS = +process.env.FPS || 15;
 const W   = +process.env.W   || 854;
 const H   = +process.env.H   || 480;
 
-const MAX_BALLS = +process.env.BALLS || 200;
 const R        = +process.env.BALL_R || 14;
 const RING_R   = +process.env.RING_R || 125;
 const HOLE_DEG = +process.env.HOLE_DEG || 90;
@@ -126,12 +98,18 @@ const PHYS_MULT = +process.env.PHYS_MULT || 3;
 
 const WIN_SECONDS = +process.env.WIN_SCREEN_SECONDS || 6;
 
-const FLAG_SIZE = +process.env.FLAG_SIZE || 24;
-const FLAGS_DIR = process.env.FLAGS_DIR || "/tmp/flags";
+const FLAG_SIZE   = +process.env.FLAG_SIZE || 24;
+const AVATAR_SIZE = +process.env.AVATAR_SIZE || 24;
+const FLAGS_DIR   = process.env.FLAGS_DIR || "/tmp/flags";
+const AVATARS_DIR = process.env.AVATARS_DIR || "/tmp/avatars";
+const COUNTRIES_PATH = process.env.COUNTRIES_PATH || "./countries.json";
 
 const TWITCH_OAUTH   = process.env.TWITCH_OAUTH || "";
 const TWITCH_CHANNEL = process.env.TWITCH_CHANNEL || "";
 const TWITCH_NICK    = process.env.TWITCH_NICK || "";
+
+const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID || "";
+const TWITCH_CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET || "";
 
 const CX = W*0.5, CY = H*0.5;
 const dt = (PHYS_MULT) / FPS;
@@ -146,10 +124,24 @@ function setPix(x,y,r,g,b){
 function fillSolid(r,g,b){
   for(let i=0;i<rgb.length;i+=3){ rgb[i]=r; rgb[i+1]=g; rgb[i+2]=b; }
 }
+function clearBG(){ fillSolid(14, 20, 38); } // deep navy
 
-// ✅ darker background so white text stands out
-function clearBG(){
-  fillSolid(14, 20, 38); // deep navy
+function fillRect(x,y,w,h,col){
+  const [r,g,b]=col;
+  const x0=Math.max(0,x|0), y0=Math.max(0,y|0);
+  const x1=Math.min(W,(x+w)|0), y1=Math.min(H,(y+h)|0);
+  for(let yy=y0; yy<y1; yy++){
+    let idx=(yy*W + x0)*3;
+    for(let xx=x0; xx<x1; xx++){
+      rgb[idx]=r; rgb[idx+1]=g; rgb[idx+2]=b;
+      idx+=3;
+    }
+  }
+}
+function rectOutline(x,y,w,h,col){
+  const [r,g,b]=col;
+  for(let i=0;i<w;i++){ setPix(x+i,y,r,g,b); setPix(x+i,y+h-1,r,g,b); }
+  for(let i=0;i<h;i++){ setPix(x,y+i,r,g,b); setPix(x+w-1,y+i,r,g,b); }
 }
 
 // ---------- tiny font ----------
@@ -193,10 +185,12 @@ const FONT={
   '/':[0b00001,0b00010,0b00100,0b01000,0b10000,0,0],
   ' ':[0,0,0,0,0,0,0],
   '-':[0,0,0b11111,0,0,0,0],
+  '_':[0,0,0,0,0,0,0b11111],
+  '?':[0b01110,0b10001,0b00010,0b00100,0b00100,0,0b00100],
 };
 
 function drawChar(ch,x,y,scale,color){
-  const rows = FONT[ch] || FONT[' '];
+  const rows = FONT[ch] || FONT['?'];
   const [r,g,b]=color;
   for(let rr=0; rr<7; rr++){
     const bits=rows[rr];
@@ -221,23 +215,16 @@ function textWidth(text,scale){
   text=String(text);
   return text.length*(5*scale+scale)-scale;
 }
-function drawTextCentered(text,cx,cy,scale,color){
-  const w=textWidth(text,scale), h=7*scale;
-  drawText(text, (cx-w/2)|0, (cy-h/2)|0, scale, color);
-}
-
-// Shadowed white text for readability
 function drawTextShadow(text,x,y,scale){
   drawText(text, x+1, y+1, scale, [0,0,0]);
   drawText(text, x, y, scale, [255,255,255]);
 }
 function drawTextCenteredShadow(text,cx,cy,scale){
   const w=textWidth(text,scale), h=7*scale;
-  const x=(cx-w/2)|0, y=(cy-h/2)|0;
-  drawTextShadow(text,x,y,scale);
+  drawTextShadow(text, (cx-w/2)|0, (cy-h/2)|0, scale);
 }
 
-// ---------- deterministic color ----------
+// ---------- hashing for colors ----------
 function hashStr(s){
   s=String(s);
   let h=2166136261>>>0;
@@ -252,62 +239,54 @@ function colorFromName(name){
   return [60+(h&0x7F), 60+((h>>7)&0x7F), 60+((h>>14)&0x7F)];
 }
 
-// ---------- flag sprite loading ----------
-function loadFlagRGB(iso2){
-  // expects /tmp/flags/{iso}_{size}.rgb
-  const p = `${FLAGS_DIR}/${iso2}_${FLAG_SIZE}.rgb`;
+// ---------- sprite loading ----------
+function readRGB(path, size){
   try{
-    const buf = fs.readFileSync(p);
-    if(buf.length === FLAG_SIZE*FLAG_SIZE*3) return buf;
+    const buf = fs.readFileSync(path);
+    if(buf.length === size*size*3) return buf;
   }catch{}
   return null;
 }
 
-// same mapping used in bash (keep consistent)
-const ISO_MAP = new Map(Object.entries({
-  "EGYPT":"eg","QATAR":"qa","SAUDI ARABIA":"sa","UAE":"ae","OMAN":"om","TUNISIA":"tn","MOROCCO":"ma","ALGERIA":"dz",
-  "JORDAN":"jo","LEBANON":"lb","UNITED STATES":"us","UNITED KINGDOM":"gb","FRANCE":"fr","GERMANY":"de","SPAIN":"es",
-  "ITALY":"it","CANADA":"ca","BRAZIL":"br","ARGENTINA":"ar","CHINA":"cn","INDIA":"in","JAPAN":"jp","KOREA":"kr",
-  "TURKIYE":"tr","RUSSIA":"ru","UKRAINE":"ua","POLAND":"pl","NETHERLANDS":"nl","SWEDEN":"se","NORWAY":"no"
-}));
+function flagRGB(iso2){
+  return readRGB(`${FLAGS_DIR}/${iso2}_${FLAG_SIZE}.rgb`, FLAG_SIZE);
+}
+function avatarRGB(login){
+  return readRGB(`${AVATARS_DIR}/${login}_${AVATAR_SIZE}.rgb`, AVATAR_SIZE);
+}
 
-// ---------- draw a ball with a flag sprite ----------
+// draw sprite into circle-clipped region
+function blitSpriteInCircle(centerX, centerY, radius, spriteBuf, spriteSize){
+  if(!spriteBuf) return;
+  const half=(spriteSize/2)|0;
+  const x0=(centerX - half)|0;
+  const y0=(centerY - half)|0;
+
+  const r2=(radius-1)*(radius-1);
+  for(let sy=0; sy<spriteSize; sy++){
+    for(let sx=0; sx<spriteSize; sx++){
+      const px = x0 + sx;
+      const py = y0 + sy;
+      const dx = px - centerX;
+      const dy = py - centerY;
+      if(dx*dx + dy*dy > r2) continue;
+
+      const si = (sy*spriteSize + sx)*3;
+      setPix(px, py, spriteBuf[si], spriteBuf[si+1], spriteBuf[si+2]);
+    }
+  }
+}
+
 const mask=[];
 for(let y=-R;y<=R;y++) for(let x=-R;x<=R;x++) if(x*x+y*y<=R*R) mask.push([x,y]);
 
-function drawBallWithFlag(cx,cy,baseCol,flagBuf){
+function drawBallBase(cx,cy,col){
   const x0=cx|0, y0=cy|0;
-
-  // base circle
-  const [r,g,b]=baseCol;
+  const [r,g,b]=col;
   for(let k=0;k<mask.length;k++){
     const dx=mask[k][0], dy=mask[k][1];
     setPix(x0+dx,y0+dy,r,g,b);
   }
-
-  // flag overlay centered
-  if(flagBuf){
-    const half=(FLAG_SIZE/2)|0;
-    const fx0 = (x0 - half)|0;
-    const fy0 = (y0 - half)|0;
-
-    for(let fy=0; fy<FLAG_SIZE; fy++){
-      for(let fx=0; fx<FLAG_SIZE; fx++){
-        const sx = fx0 + fx;
-        const sy = fy0 + fy;
-
-        // clip to circle so the flag stays inside the ball
-        const dx = sx - x0;
-        const dy = sy - y0;
-        if(dx*dx + dy*dy > (R-1)*(R-1)) continue;
-
-        const si = (fy*FLAG_SIZE + fx)*3;
-        setPix(sx, sy, flagBuf[si], flagBuf[si+1], flagBuf[si+2]);
-      }
-    }
-  }
-
-  // border
   for(let deg=0;deg<360;deg+=14){
     const a=deg*Math.PI/180;
     setPix((x0+Math.cos(a)*R)|0, (y0+Math.sin(a)*R)|0, 0,0,0);
@@ -335,23 +314,6 @@ function drawRing(holeCenterDeg){
 }
 
 // UI
-function fillRect(x,y,w,h,col){
-  const [r,g,b]=col;
-  const x0=Math.max(0,x|0), y0=Math.max(0,y|0);
-  const x1=Math.min(W,(x+w)|0), y1=Math.min(H,(y+h)|0);
-  for(let yy=y0; yy<y1; yy++){
-    let idx=(yy*W + x0)*3;
-    for(let xx=x0; xx<x1; xx++){
-      rgb[idx]=r; rgb[idx+1]=g; rgb[idx+2]=b;
-      idx+=3;
-    }
-  }
-}
-function rectOutline(x,y,w,h,col){
-  const [r,g,b]=col;
-  for(let i=0;i<w;i++){ setPix(x+i,y,r,g,b); setPix(x+i,y+h-1,r,g,b); }
-  for(let i=0;i<h;i++){ setPix(x,y+i,r,g,b); setPix(x+w-1,y+i,r,g,b); }
-}
 const UI_BG=[24,34,58], UI_BG2=[14,20,38], UI_LINE=[100,140,190];
 let topChatter="none";
 let lastWinner="none";
@@ -382,36 +344,124 @@ function drawTopUI(aliveCount,total){
   drawTextShadow(String(topChatter).slice(0,14), rx0+10, cardY+20, 2);
 }
 function drawJoinText(){
-  drawTextCenteredShadow("WRITE YOUR COUNTRY IN CHAT TO JOIN", W/2, 95, 2);
+  drawTextCenteredShadow("TYPE  ME  IN CHAT TO JOIN", W/2, 95, 2);
 }
-
-// ✅ NO white label background: we just draw clean white text with shadow
 function drawNameUnderBall(x,y,name){
-  const label = String(name).toUpperCase().replace(/[^A-Z ]/g,' ').trim().slice(0,14);
+  const label = String(name).toUpperCase().replace(/[^A-Z0-9_ ]/g,' ').trim().slice(0,14);
   const w = textWidth(label, 1);
-  const tx = (x - w/2)|0;
-  const ty = (y + R + 6)|0;
-  drawTextShadow(label, tx, ty, 1);
+  drawTextShadow(label, (x-w/2)|0, (y + R + 6)|0, 1);
 }
 
-// chat (logs kept)
-const countrySet = new Set(Array.from(ISO_MAP.keys()));
-
-function normalizeCountry(s){
-  s=String(s||"").toUpperCase().replace(/[^A-Z ]/g,' ').replace(/\s+/g,' ').trim();
-  if(countrySet.has(s)) return s;
-  return null;
-}
-
-const chatUsers = new Map();
-function updateTopChatter(){
-  let best=null, bestN=-1;
-  for(const [u,info] of chatUsers.entries()){
-    if(info.msgs>bestN){ bestN=info.msgs; best=u; }
+// ---------- countries.json loading ----------
+function loadCountries(){
+  const raw = fs.readFileSync(COUNTRIES_PATH, "utf8");
+  const arr = JSON.parse(raw);
+  const seen = new Set();
+  const out = [];
+  for(const c of arr){
+    const name = String(c.name||"").trim();
+    const iso2 = String(c.iso2||"").trim().toLowerCase();
+    if(!name || iso2.length!==2) continue;
+    if(seen.has(iso2)) continue;
+    seen.add(iso2);
+    out.push({ name, iso2 });
   }
-  topChatter = best ? best : "none";
+  return out;
+}
+const COUNTRIES = loadCountries();
+console.error(`[countries] loaded ${COUNTRIES.length} unique countries from ${COUNTRIES_PATH}`);
+
+// ---------- Helix avatar fetch ----------
+function execFFmpegToRGB(url, outPath, size){
+  return new Promise((resolve,reject)=>{
+    execFile("ffmpeg", [
+      "-hide_banner","-loglevel","error","-y",
+      "-i", url,
+      "-vf", `scale=${size}:${size}:flags=lanczos`,
+      "-f","rawvideo","-pix_fmt","rgb24", outPath
+    ], (err)=> err ? reject(err) : resolve());
+  });
 }
 
+let appToken = "";
+let appTokenExp = 0;
+
+async function getAppToken(){
+  const now = Date.now();
+  if(appToken && now < appTokenExp - 30_000) return appToken;
+  if(!TWITCH_CLIENT_ID || !TWITCH_CLIENT_SECRET){
+    console.error("[helix] missing TWITCH_CLIENT_ID/SECRET; avatars disabled");
+    return "";
+  }
+  const url = `https://id.twitch.tv/oauth2/token?client_id=${encodeURIComponent(TWITCH_CLIENT_ID)}&client_secret=${encodeURIComponent(TWITCH_CLIENT_SECRET)}&grant_type=client_credentials`;
+  const res = await fetch(url, { method:"POST" });
+  const j = await res.json();
+  if(!j.access_token){
+    console.error("[helix] token error:", JSON.stringify(j).slice(0,250));
+    return "";
+  }
+  appToken = j.access_token;
+  appTokenExp = now + (j.expires_in ? j.expires_in*1000 : 3600_000);
+  console.error("[helix] app token ok");
+  return appToken;
+}
+
+async function helixUserByLogin(login){
+  const tok = await getAppToken();
+  if(!tok) return null;
+  const res = await fetch(`https://api.twitch.tv/helix/users?login=${encodeURIComponent(login)}`, {
+    headers:{
+      "Client-ID": TWITCH_CLIENT_ID,
+      "Authorization": `Bearer ${tok}`
+    }
+  });
+  const j = await res.json();
+  const u = j && j.data && j.data[0];
+  if(!u) return null;
+  return { display_name: u.display_name, profile_image_url: u.profile_image_url };
+}
+
+// ---------- players join queue (type "me") ----------
+const players = new Map(); // login -> { login, display, avatarBuf|null, baseCol }
+function updateTopChatter(){
+  // top chatter = most chat msgs; we log join separately
+  // keep simple: just show latest joiner if any
+  let last = "none";
+  for(const k of players.keys()) last = k;
+  topChatter = last==="none" ? "none" : last;
+}
+
+async function fetchAndCacheAvatar(login){
+  const p = players.get(login);
+  if(!p) return;
+
+  const info = await helixUserByLogin(login);
+  if(!info){
+    console.error(`[avatar] helix user not found for ${login}`);
+    return;
+  }
+
+  p.display = info.display_name || p.display;
+
+  if(!info.profile_image_url){
+    console.error(`[avatar] no profile_image_url for ${login}`);
+    return;
+  }
+
+  const outPath = `${AVATARS_DIR}/${login}_${AVATAR_SIZE}.rgb`;
+  try{
+    await execFFmpegToRGB(info.profile_image_url, outPath, AVATAR_SIZE);
+    const buf = readRGB(outPath, AVATAR_SIZE);
+    if(buf){
+      p.avatarBuf = buf;
+      console.error(`[avatar] cached ${login}`);
+    }
+  }catch(e){
+    console.error(`[avatar] ffmpeg failed for ${login}: ${e.message}`);
+  }
+}
+
+// ---------- Twitch IRC chat ----------
 function startTwitchChat(){
   if(!TWITCH_OAUTH || !TWITCH_CHANNEL || !TWITCH_NICK){
     console.error("[chat] disabled (missing TWITCH_OAUTH/TWITCH_CHANNEL/TWITCH_NICK)");
@@ -434,7 +484,7 @@ function startTwitchChat(){
       let line = acc.slice(0,idx);
       acc = acc.slice(idx+2);
 
-      if(printed < 25){ console.error("[chat:raw]", line); printed++; }
+      if(printed < 30){ console.error("[chat:raw]", line); printed++; }
 
       if(line.startsWith('PING')){
         sock.write('PONG :tmi.twitch.tv\r\n');
@@ -447,93 +497,105 @@ function startTwitchChat(){
       const m = line.match(/^:([^!]+)![^ ]+ PRIVMSG #[^ ]+ :(.+)$/);
       if(m){
         const user=m[1].toLowerCase();
-        const msg=m[2];
+        const msg=m[2].trim();
         console.error(`[chat:msg] ${user}: ${msg}`);
 
-        const info = chatUsers.get(user) || { msgs:0, country:null };
-        info.msgs++;
-
-        const c = normalizeCountry(msg);
-        if(c){
-          info.country = c;
-          console.error(`[chat:country] ${user} -> ${c}`);
+        if(msg.toLowerCase() === "me"){
+          if(players.has(user)){
+            console.error(`[join] ${user} already joined (ignored)`);
+          }else{
+            players.set(user, { login:user, display:user, avatarBuf:null, baseCol: colorFromName(user) });
+            console.error(`[join] ${user} joined queue`);
+            updateTopChatter();
+            fetchAndCacheAvatar(user).catch(e=>console.error("[avatar] error", e.message));
+          }
         }
-        chatUsers.set(user, info);
-        updateTopChatter();
       }
     }
   });
+
   sock.on('error', e=>console.error('[chat] error', e.message));
   sock.on('end', ()=>console.error('[chat] ended'));
 }
 startTwitchChat();
 
-// game
+// ---------- game state ----------
 function rand(a,b){ return a + Math.random()*(b-a); }
-let balls=[], alive=[], aliveCount=0;
+
+let entities = [];      // all balls (countries + players)
+let alive = [];
+let aliveCount = 0;
+
 let state="PLAY";
 let t=0;
-let winnerName="none";
+
 let winFrames=0;
-
-function getRoundPlayers(){
-  const players=[];
-  for(const [u,info] of chatUsers.entries()){
-    players.push(info.country ? info.country : u.toUpperCase());
-  }
-  if(players.length>0) return players.slice(0, Math.min(MAX_BALLS, players.length));
-
-  // fallback: cycle through ISO_MAP keys
-  const defaults = Array.from(ISO_MAP.keys());
-  const out=[];
-  for(let i=0;i<MAX_BALLS;i++) out.push(defaults[i % defaults.length]);
-  return out;
-}
+let winner = null;      // { type:"country"|"player", name, imageBuf, imageSize }
 
 function startRound(){
-  const names=getRoundPlayers();
-  balls=[]; alive=new Array(names.length).fill(true); aliveCount=names.length;
+  entities = [];
 
+  // 1) Countries (one each)
+  for(const c of COUNTRIES){
+    const flag = flagRGB(c.iso2);
+    entities.push({
+      type: "country",
+      name: c.name,
+      imageBuf: flag,
+      imageSize: FLAG_SIZE,
+      baseCol: [50,70,110],
+      x: 0, y: 0, vx: 0, vy: 0,
+    });
+  }
+
+  // 2) Players (joined by "me")
+  for(const p of players.values()){
+    // load cached avatar file if it exists but not loaded yet
+    if(!p.avatarBuf){
+      const buf = avatarRGB(p.login);
+      if(buf) p.avatarBuf = buf;
+    }
+    entities.push({
+      type:"player",
+      name: p.display || p.login,
+      imageBuf: p.avatarBuf,
+      imageSize: AVATAR_SIZE,
+      baseCol: p.baseCol,
+      x:0,y:0,vx:0,vy:0,
+    });
+  }
+
+  alive = new Array(entities.length).fill(true);
+  aliveCount = entities.length;
+
+  // spawn cramped in ring
   const innerR = RING_R - R - 6;
-  const spacing = R * 1.75;
+  const spacing = R * 1.65;
   const sx = CX - innerR;
   const sy = CY - innerR;
 
   let idx=0;
-  for(let y=sy; y<=CY+innerR && idx<names.length; y+=spacing){
-    for(let x=sx; x<=CX+innerR && idx<names.length; x+=spacing){
+  for(let y=sy; y<=CY+innerR && idx<entities.length; y+=spacing){
+    for(let x=sx; x<=CX+innerR && idx<entities.length; x+=spacing){
       const dx=x-CX, dy=y-CY;
       if(dx*dx+dy*dy <= innerR*innerR){
-        const name=names[idx++];
-        const iso = ISO_MAP.get(name) || null;
-        const flag = iso ? loadFlagRGB(iso) : null;
-        balls.push({
-          name,
-          baseCol: colorFromName(name),
-          flag,
-          x: x + rand(-R*0.35, R*0.35),
-          y: y + rand(-R*0.35, R*0.35),
-          vx: rand(-SPEED,SPEED),
-          vy: rand(-SPEED,SPEED),
-        });
+        const e=entities[idx++];
+        e.x = x + rand(-R*0.35, R*0.35);
+        e.y = y + rand(-R*0.35, R*0.35);
+        e.vx = rand(-SPEED,SPEED);
+        e.vy = rand(-SPEED,SPEED);
       }
     }
   }
-  while(idx<names.length){
-    const name=names[idx++];
-    const iso = ISO_MAP.get(name) || null;
-    const flag = iso ? loadFlagRGB(iso) : null;
-    balls.push({
-      name,
-      baseCol: colorFromName(name),
-      flag,
-      x: CX + rand(-innerR*0.15, innerR*0.15),
-      y: CY + rand(-innerR*0.15, innerR*0.15),
-      vx: rand(-SPEED,SPEED),
-      vy: rand(-SPEED,SPEED),
-    });
+  while(idx<entities.length){
+    const e=entities[idx++];
+    e.x = CX + rand(-innerR*0.15, innerR*0.15);
+    e.y = CY + rand(-innerR*0.15, innerR*0.15);
+    e.vx = rand(-SPEED,SPEED);
+    e.vy = rand(-SPEED,SPEED);
   }
 
+  winner = null;
   state="PLAY";
   t=0;
 }
@@ -560,9 +622,9 @@ function stepPhysics(){
   const holeCenterDeg = (t*SPIN*180/Math.PI)%360;
 
   gclear();
-  for(let i=0;i<balls.length;i++){
+  for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
-    const b=balls[i];
+    const b=entities[i];
     b.x += b.vx*dt;
     b.y += b.vy*dt;
     gpush(i,b.x,b.y);
@@ -580,20 +642,23 @@ function stepPhysics(){
           if(nx<0||ny<0||nx>=gridW||ny>=gridH) continue;
           const other=grid[ny*gridW+nx];
           if(!other) continue;
+
           for(let ai=0; ai<cell.length; ai++){
             const i=cell[ai]; if(!alive[i]) continue;
-            const A=balls[i];
+            const A=entities[i];
+
             for(let bj=0; bj<other.length; bj++){
               const j=other[bj]; if(!alive[j]) continue;
               if(base===(ny*gridW+nx) && j<=i) continue;
 
-              const B=balls[j];
+              const B=entities[j];
               const dx=B.x-A.x, dy=B.y-A.y;
               const d2=dx*dx+dy*dy;
               if(d2>0 && d2<minD2){
                 const d=Math.sqrt(d2);
                 const nxn=dx/d, nyn=dy/d;
                 const overlap=minD-d;
+
                 A.x -= nxn*overlap*0.5; A.y -= nyn*overlap*0.5;
                 B.x += nxn*overlap*0.5; B.y += nyn*overlap*0.5;
 
@@ -613,9 +678,10 @@ function stepPhysics(){
   }
 
   const wallR = RING_R - R - 2;
-  for(let i=0;i<balls.length;i++){
+  for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
-    const b=balls[i];
+    const b=entities[i];
+
     const dx=b.x-CX, dy=b.y-CY;
     const dist=Math.sqrt(dx*dx+dy*dy)||0.0001;
     const angDeg=(Math.atan2(dy,dx)*180/Math.PI+360)%360;
@@ -635,64 +701,96 @@ function stepPhysics(){
         b.vx -= 2*vn*nxn;
         b.vy -= 2*vn*nyn;
       }
-      // no damping (keep speed)
     }
   }
   return holeCenterDeg;
 }
 
+function drawEntityBall(e){
+  const x=e.x|0, y=e.y|0;
+  drawBallBase(x,y,e.baseCol);
+  if(e.imageBuf){
+    blitSpriteInCircle(x,y,R,e.imageBuf,e.imageSize);
+  }
+  drawNameUnderBall(x,y,e.name);
+}
+
+// winner selection
+function getWinnerIndex(){
+  for(let i=0;i<entities.length;i++) if(alive[i]) return i;
+  return -1;
+}
+
+// render
 function renderPlay(holeCenterDeg){
   clearBG();
-  drawTopUI(aliveCount, balls.length);
+  drawTopUI(aliveCount, entities.length);
   drawJoinText();
   drawRing(holeCenterDeg);
 
-  for(let i=0;i<balls.length;i++){
+  for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
-    const b=balls[i];
-    drawBallWithFlag(b.x|0, b.y|0, b.baseCol, b.flag);
-    drawNameUnderBall(b.x|0, b.y|0, b.name);
+    drawEntityBall(entities[i]);
   }
 }
 
 function renderWin(){
   fillSolid(8,10,18);
-  const panelW=Math.min(W-60,760), panelH=240;
-  const px=((W-panelW)/2)|0, py=70;
 
-  drawPanel(px,py,panelW,panelH,UI_BG,UI_LINE);
-  drawTextCenteredShadow("ROUND SUMMARY", W/2, py+45, 3);
-  drawTextCenteredShadow("THE LAST ONE INSIDE THE ARENA WINS", W/2, py+75, 1);
+  const panelW=Math.min(W-60,760), panelH=260;
+  const px=((W-panelW)/2)|0, py=65;
 
-  drawPanel(px+20, py+100, panelW-40, 110, [14,20,38], UI_LINE);
-  drawTextShadow("WINNER:", px+35, py+130, 2);
-  drawTextShadow(String(winnerName).slice(0,26), px+170, py+130, 2);
+  drawPanel(px,py,panelW,panelH,UI_BG,[100,140,190]);
+  drawTextCenteredShadow("WE HAVE A WINNER", W/2, py+45, 3);
 
-  drawTextCenteredShadow("NEXT ROUND STARTING...", W/2, py+panelH+40, 2);
+  if(winner){
+    // big portrait box
+    const box=96;
+    const bx=(W/2 - box/2)|0;
+    const by=(py+75)|0;
+    fillRect(bx,by,box,box,[255,255,255]);
+    rectOutline(bx,by,box,box,[0,0,0]);
+
+    if(winner.imageBuf){
+      // center big sprite in portrait box (stretch with nearest-ish)
+      const s = winner.imageSize;
+      const buf = winner.imageBuf;
+      for(let yy=0; yy<box; yy++){
+        for(let xx=0; xx<box; xx++){
+          const sx = Math.min(s-1, (xx * s / box)|0);
+          const sy = Math.min(s-1, (yy * s / box)|0);
+          const si = (sy*s + sx)*3;
+          setPix(bx+xx, by+yy, buf[si], buf[si+1], buf[si+2]);
+        }
+      }
+    }
+
+    drawTextCenteredShadow(winner.name, W/2, py+190, 2);
+    drawTextCenteredShadow(winner.type==="country" ? "COUNTRY WINNER" : "PLAYER WINNER", W/2, py+215, 1);
+  }
+
+  drawTextCenteredShadow("NEXT ROUND STARTING...", W/2, py+panelH+38, 2);
 }
 
-function getWinnerIndex(){
-  for(let i=0;i<balls.length;i++) if(alive[i]) return i;
-  return -1;
+function drawPanel(x,y,w,h,fillCol,lineCol){
+  fillRect(x,y,w,h,fillCol);
+  rectOutline(x,y,w,h,lineCol);
 }
 
-// atomic PPM output
-const headerBuf = Buffer.from(`P6\n${W} ${H}\n255\n`);
-const frameBuf = Buffer.alloc(headerBuf.length + rgb.length);
-function writeFrameAtomic(){
-  headerBuf.copy(frameBuf,0);
-  rgb.copy(frameBuf,headerBuf.length);
-  return process.stdout.write(frameBuf);
-}
+// main loop
+let state="PLAY";
+let t=0;
+let winFrames=0;
+let winner=null;
 
-let busy=false;
 function tick(){
   if(state==="PLAY"){
     const holeCenterDeg = stepPhysics();
     if(aliveCount <= 1){
       const wi=getWinnerIndex();
-      winnerName = wi>=0 ? balls[wi].name : "none";
-      lastWinner = winnerName;
+      const e = wi>=0 ? entities[wi] : null;
+      winner = e ? { type:e.type, name:e.name, imageBuf:e.imageBuf, imageSize:e.imageSize } : null;
+      lastWinner = winner ? winner.name : "none";
       state="WIN";
       winFrames=0;
       renderWin();
@@ -707,15 +805,39 @@ function tick(){
     }
   }
 }
+
+// atomic PPM output
+const headerBuf = Buffer.from(`P6\n${W} ${H}\n255\n`);
+const frameBuf = Buffer.alloc(headerBuf.length + rgb.length);
+function writeFrameAtomic(){
+  headerBuf.copy(frameBuf,0);
+  rgb.copy(frameBuf,headerBuf.length);
+  return process.stdout.write(frameBuf);
+}
+
+let busy=false;
 function stepOnce(){
   if(busy) return;
   busy=true;
   tick();
-  const ok = writeFrameAtomic();
+  const ok=writeFrameAtomic();
   if(ok) busy=false;
   else process.stdout.once('drain', ()=>{ busy=false; });
 }
+
 setInterval(stepOnce, Math.round(1000/FPS));
+
+// restart round when new players join (optional): you asked “instantly start a round with all commenters”
+// Here we restart when a new player joins (me). Keeps it simple.
+let lastPlayerCount = 0;
+setInterval(()=>{
+  const pc = players.size;
+  if(pc !== lastPlayerCount){
+    console.error(`[round] players changed ${lastPlayerCount} -> ${pc}, restarting round`);
+    lastPlayerCount = pc;
+    startRound();
+  }
+}, 1000);
 JS
 
 URL="rtmps://live.twitch.tv/app/${STREAM_KEY}"
