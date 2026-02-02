@@ -3,30 +3,36 @@ set -euo pipefail
 
 : "${STREAM_KEY:?STREAM_KEY missing}"
 
+# Twitch chat (IRC)
 : "${TWITCH_OAUTH:=}"
 : "${TWITCH_CHANNEL:=}"
 : "${TWITCH_NICK:=}"
 
+# Twitch Helix (optional avatars)
 : "${TWITCH_CLIENT_ID:=}"
 : "${TWITCH_CLIENT_SECRET:=}"
 
-export FPS="${FPS:-15}"
+# Video / game params
+export FPS="${FPS:-20}"
 export W="${W:-854}"
 export H="${H:-480}"
 
 export BALL_R="${BALL_R:-14}"
-export RING_R="${RING_R:-125}"
-export HOLE_DEG="${HOLE_DEG:-90}"
-export SPIN="${SPIN:-1.2}"
+export RING_R="${RING_R:-160}"
+export HOLE_DEG="${HOLE_DEG:-70}"
+export SPIN="${SPIN:-0.9}"
 export SPEED="${SPEED:-255}"
 export PHYS_MULT="${PHYS_MULT:-3}"
 export WIN_SCREEN_SECONDS="${WIN_SCREEN_SECONDS:-6}"
 
-export FLAG_SIZE="${FLAG_SIZE:-24}"
-export AVATAR_SIZE="${AVATAR_SIZE:-24}"
-export FLAGS_DIR="${FLAGS_DIR:-/tmp/flags}"
-export AVATARS_DIR="${AVATARS_DIR:-/tmp/avatars}"
+# Assets
 export COUNTRIES_PATH="${COUNTRIES_PATH:-./countries.json}"
+
+export FLAG_SIZE="${FLAG_SIZE:-26}"
+export FLAGS_DIR="${FLAGS_DIR:-/tmp/flags}"
+
+export AVATAR_SIZE="${AVATAR_SIZE:-26}"
+export AVATARS_DIR="${AVATARS_DIR:-/tmp/avatars}"
 
 echo "=== GAME SETTINGS ==="
 echo "FPS=$FPS SIZE=${W}x${H} BALL_R=$BALL_R RING_R=$RING_R HOLE_DEG=$HOLE_DEG SPIN=$SPIN SPEED=$SPEED PHYS_MULT=$PHYS_MULT"
@@ -51,6 +57,7 @@ download_flag () {
 
   local png="$FLAGS_DIR/${iso}.png"
   if [ ! -s "$png" ]; then
+    # small flags endpoint
     curl -fsSL "https://flagcdn.com/w80/${iso}.png" -o "$png" || return 0
   fi
 
@@ -64,6 +71,7 @@ echo "[flags] preparing from $COUNTRIES_PATH ..."
 ISO_LIST="$(grep -oE '"iso2"[[:space:]]*:[[:space:]]*"[^"]+"' "$COUNTRIES_PATH" \
   | sed -E 's/.*"([a-zA-Z]{2})".*/\1/' \
   | tr 'A-Z' 'a-z' | sort -u)"
+
 COUNT=0
 for iso in $ISO_LIST; do
   download_flag "$iso" "$FLAG_SIZE" || true
@@ -77,28 +85,31 @@ const fs = require('fs');
 const tls = require('tls');
 const { execFile } = require('child_process');
 
-const FPS = +process.env.FPS || 15;
+// -------- env --------
+const FPS = +process.env.FPS || 20;
 const W   = +process.env.W   || 854;
 const H   = +process.env.H   || 480;
 
 const R        = +process.env.BALL_R || 14;
-const RING_R   = +process.env.RING_R || 125;
-const HOLE_DEG = +process.env.HOLE_DEG || 90;
-const SPIN     = +process.env.SPIN || 1.2;
+const RING_R   = +process.env.RING_R || 160;
+const HOLE_DEG = +process.env.HOLE_DEG || 70;
+const SPIN     = +process.env.SPIN || 0.9;
 const SPEED    = +process.env.SPEED || 255;
 const PHYS_MULT = +process.env.PHYS_MULT || 3;
 
 const WIN_SECONDS = +process.env.WIN_SCREEN_SECONDS || 6;
 
-const FLAG_SIZE   = +process.env.FLAG_SIZE || 24;
-const AVATAR_SIZE = +process.env.AVATAR_SIZE || 24;
 const FLAGS_DIR   = process.env.FLAGS_DIR || "/tmp/flags";
+const FLAG_SIZE   = +process.env.FLAG_SIZE || 26;
+
 const AVATARS_DIR = process.env.AVATARS_DIR || "/tmp/avatars";
+const AVATAR_SIZE = +process.env.AVATAR_SIZE || 26;
+
 const COUNTRIES_PATH = process.env.COUNTRIES_PATH || "./countries.json";
 
 const TWITCH_OAUTH   = process.env.TWITCH_OAUTH || "";
-const TWITCH_CHANNEL = process.env.TWITCH_CHANNEL || "";
-const TWITCH_NICK    = process.env.TWITCH_NICK || "";
+const TWITCH_CHANNEL = (process.env.TWITCH_CHANNEL || "").toLowerCase();
+const TWITCH_NICK    = (process.env.TWITCH_NICK || "").toLowerCase();
 
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID || "";
 const TWITCH_CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET || "";
@@ -106,7 +117,7 @@ const TWITCH_CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET || "";
 const CX = W*0.5, CY = H*0.5;
 const dt = (PHYS_MULT) / FPS;
 
-// ---------- framebuffer ----------
+// -------- framebuffer (P6) --------
 const rgb = Buffer.alloc(W*H*3);
 function setPix(x,y,r,g,b){
   if(x<0||y<0||x>=W||y>=H) return;
@@ -116,7 +127,6 @@ function setPix(x,y,r,g,b){
 function fillSolid(r,g,b){
   for(let i=0;i<rgb.length;i+=3){ rgb[i]=r; rgb[i+1]=g; rgb[i+2]=b; }
 }
-function clearBG(){ fillSolid(14,20,38); } // deep navy
 function fillRect(x,y,w,h,col){
   const [r,g,b]=col;
   const x0=Math.max(0,x|0), y0=Math.max(0,y|0);
@@ -135,7 +145,23 @@ function rectOutline(x,y,w,h,col){
   for(let i=0;i<h;i++){ setPix(x,y+i,r,g,b); setPix(x+w-1,y+i,r,g,b); }
 }
 
-// ---------- tiny font ----------
+// nicer dark bg (so white text pops)
+function clearBG(){
+  fillSolid(10,14,28);
+  // subtle vignette
+  for(let y=0;y<H;y+=2){
+    const v = Math.abs(y-H/2)/(H/2);
+    const dark = (v*18)|0;
+    for(let x=0;x<W;x+=2){
+      const i=(y*W+x)*3;
+      rgb[i]   = Math.max(0, rgb[i]-dark);
+      rgb[i+1] = Math.max(0, rgb[i+1]-dark);
+      rgb[i+2] = Math.max(0, rgb[i+2]-dark);
+    }
+  }
+}
+
+// -------- tiny text --------
 const FONT={
   'A':[0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
   'B':[0b11110,0b10001,0b11110,0b10001,0b10001,0b10001,0b11110],
@@ -177,6 +203,8 @@ const FONT={
   ' ':[0,0,0,0,0,0,0],
   '-':[0,0,0b11111,0,0,0,0],
   '_':[0,0,0,0,0,0,0b11111],
+  ':':[0,0b00100,0,0,0b00100,0,0],
+  '.':[0,0,0,0,0,0,0b00100],
   '?':[0b01110,0b10001,0b00010,0b00100,0b00100,0,0b00100],
 };
 function drawChar(ch,x,y,scale,color){
@@ -214,22 +242,7 @@ function drawTextCenteredShadow(text,cx,cy,scale){
   drawTextShadow(text, (cx-w/2)|0, (cy-h/2)|0, scale);
 }
 
-// colors
-function hashStr(s){
-  s=String(s);
-  let h=2166136261>>>0;
-  for(let i=0;i<s.length;i++){
-    h^=s.charCodeAt(i);
-    h=Math.imul(h,16777619)>>>0;
-  }
-  return h>>>0;
-}
-function colorFromName(name){
-  const h=hashStr(name);
-  return [60+(h&0x7F), 60+((h>>7)&0x7F), 60+((h>>14)&0x7F)];
-}
-
-// sprites
+// -------- sprites --------
 function readRGB(path,size){
   try{
     const buf=fs.readFileSync(path);
@@ -240,6 +253,7 @@ function readRGB(path,size){
 function flagRGB(iso2){ return readRGB(`${FLAGS_DIR}/${iso2}_${FLAG_SIZE}.rgb`, FLAG_SIZE); }
 function avatarRGB(login){ return readRGB(`${AVATARS_DIR}/${login}_${AVATAR_SIZE}.rgb`, AVATAR_SIZE); }
 
+// blit sprite clipped to a circle
 function blitSpriteInCircle(centerX, centerY, radius, spriteBuf, spriteSize){
   if(!spriteBuf) return;
   const half=(spriteSize/2)|0;
@@ -257,45 +271,103 @@ function blitSpriteInCircle(centerX, centerY, radius, spriteBuf, spriteSize){
   }
 }
 
+// -------- ball drawing --------
 const mask=[];
 for(let y=-R;y<=R;y++) for(let x=-R;x<=R;x++) if(x*x+y*y<=R*R) mask.push([x,y]);
+
+function hashStr(s){
+  s=String(s);
+  let h=2166136261>>>0;
+  for(let i=0;i<s.length;i++){
+    h^=s.charCodeAt(i);
+    h=Math.imul(h,16777619)>>>0;
+  }
+  return h>>>0;
+}
+function colorFromName(name){
+  const h=hashStr(name);
+  return [60+(h&0x7F), 60+((h>>7)&0x7F), 60+((h>>14)&0x7F)];
+}
 
 function drawBallBase(cx,cy,col){
   const x0=cx|0, y0=cy|0;
   const [r,g,b]=col;
   for(const [dx,dy] of mask) setPix(x0+dx,y0+dy,r,g,b);
-  for(let deg=0;deg<360;deg+=14){
+
+  // small rim highlight
+  for(let deg=0;deg<360;deg+=10){
     const a=deg*Math.PI/180;
     setPix((x0+Math.cos(a)*R)|0,(y0+Math.sin(a)*R)|0,0,0,0);
   }
 }
 
+function drawNameUnderBall(x,y,name){
+  const label=String(name).toUpperCase().replace(/[^A-Z0-9_ .:-]/g,' ').trim().slice(0,16);
+  const w=textWidth(label,1);
+  drawTextShadow(label,(x-w/2)|0,(y+R+6)|0,1);
+}
+
+// -------- ring drawing (much nicer) --------
 function inHole(angleDeg, holeCenterDeg){
   const half=HOLE_DEG/2;
   let d=(angleDeg-holeCenterDeg+180)%360-180;
   return Math.abs(d)<=half;
 }
+
+// draw thick ring with soft-ish edge
 function drawRing(holeCenterDeg){
-  const thick=4;
-  for(let deg=0;deg<360;deg++){
-    if(inHole(deg,holeCenterDeg)) continue;
+  const thickness = 10;
+  const inner = RING_R - thickness;
+  const outer = RING_R + thickness;
+
+  // Draw ring by sampling angles with thickness bands
+  for(let deg=0; deg<360; deg+=0.5){
+    if(inHole(deg, holeCenterDeg)) continue;
     const a=deg*Math.PI/180;
-    const x=(CX+Math.cos(a)*RING_R)|0;
-    const y=(CY+Math.sin(a)*RING_R)|0;
-    for(let k=-thick;k<=thick;k++){
-      setPix(x+k,y,220,220,220);
-      setPix(x,y+k,220,220,220);
+    const ca=Math.cos(a), sa=Math.sin(a);
+
+    // multi-stroke gives a smoother look
+    for(let rr=inner; rr<=outer; rr++){
+      const x=(CX + ca*rr)|0;
+      const y=(CY + sa*rr)|0;
+
+      // gradient-ish based on rr
+      const t=(rr-inner)/(outer-inner);
+      const v=(200 + (1-t)*30)|0;
+      setPix(x,y,v,v,v);
+    }
+  }
+
+  // emphasize outer/inner edges
+  for(let deg=0; deg<360; deg+=1){
+    if(inHole(deg, holeCenterDeg)) continue;
+    const a=deg*Math.PI/180;
+    const ca=Math.cos(a), sa=Math.sin(a);
+    const x1=(CX + ca*(outer+1))|0, y1=(CY + sa*(outer+1))|0;
+    const x2=(CX + ca*(inner-1))|0, y2=(CY + sa*(inner-1))|0;
+    setPix(x1,y1,30,30,30);
+    setPix(x2,y2,30,30,30);
+  }
+
+  // draw the "hole" edges so it looks intentional
+  const edgeA = (holeCenterDeg - HOLE_DEG/2);
+  const edgeB = (holeCenterDeg + HOLE_DEG/2);
+  for(const edge of [edgeA, edgeB]){
+    const a=edge*Math.PI/180;
+    const ca=Math.cos(a), sa=Math.sin(a);
+    for(let rr=inner-2; rr<=outer+2; rr++){
+      const x=(CX + ca*rr)|0, y=(CY + sa*rr)|0;
+      setPix(x,y,255,120,40);
     }
   }
 }
 
-// UI
-const UI_BG=[24,34,58], UI_BG2=[14,20,38], UI_LINE=[100,140,190];
+// -------- UI --------
+const UI_BG=[18,26,46], UI_BG2=[10,14,28], UI_LINE=[110,150,210];
 let topChatter="none";
 let lastWinner="none";
 
 function drawPanel(x,y,w,h,fillCol,lineCol){ fillRect(x,y,w,h,fillCol); rectOutline(x,y,w,h,lineCol); }
-
 function drawTopUI(aliveCount,total){
   const pad=10, barH=58;
   drawPanel(pad,pad,W-pad*2,barH,UI_BG,UI_LINE);
@@ -316,14 +388,12 @@ function drawTopUI(aliveCount,total){
   drawText("TOP CHATTER", rx0+10, cardY+6, 1, [180,200,230]);
   drawTextShadow(String(topChatter).slice(0,14), rx0+10, cardY+20, 2);
 }
-function drawJoinText(){ drawTextCenteredShadow("TYPE  ME  IN CHAT TO JOIN", W/2, 95, 2); }
-function drawNameUnderBall(x,y,name){
-  const label=String(name).toUpperCase().replace(/[^A-Z0-9_ ]/g,' ').trim().slice(0,14);
-  const w=textWidth(label,1);
-  drawTextShadow(label,(x-w/2)|0,(y+R+6)|0,1);
+function drawJoinText(){
+  drawTextCenteredShadow("JOIN OPENS WHEN < 10 COUNTRIES LEFT", W/2, 95, 2);
+  drawTextCenteredShadow("TYPE  ME  OR  YOUR USERNAME", W/2, 115, 2);
 }
 
-// countries.json
+// -------- countries.json --------
 function loadCountries(){
   const raw=fs.readFileSync(COUNTRIES_PATH,"utf8");
   const arr=JSON.parse(raw);
@@ -342,14 +412,18 @@ function loadCountries(){
 const COUNTRIES=loadCountries();
 console.error(`[countries] loaded ${COUNTRIES.length} unique countries from ${COUNTRIES_PATH}`);
 
-// helix avatars
+// -------- helix avatars (optional) --------
 function execFFmpegToRGB(url,outPath,size){
   return new Promise((resolve,reject)=>{
-    execFile("ffmpeg",["-hide_banner","-loglevel","error","-y","-i",url,"-vf",`scale=${size}:${size}:flags=lanczos`,"-f","rawvideo","-pix_fmt","rgb24",outPath],
-      (err)=>err?reject(err):resolve()
-    );
+    execFile("ffmpeg",[
+      "-hide_banner","-loglevel","error","-y",
+      "-i",url,
+      "-vf",`scale=${size}:${size}:flags=lanczos`,
+      "-f","rawvideo","-pix_fmt","rgb24",outPath
+    ], (err)=>err?reject(err):resolve());
   });
 }
+
 let appToken="", appTokenExp=0;
 async function getAppToken(){
   const now=Date.now();
@@ -382,13 +456,16 @@ async function helixUserByLogin(login){
   return { display_name:u.display_name, profile_image_url:u.profile_image_url };
 }
 
-// players map (join via "me")
+// -------- players --------
 const players=new Map(); // login -> {login, display, avatarBuf|null, baseCol}
+let joinedThisRound = new Set();
+
 function updateTopChatter(){
   let last="none";
   for(const k of players.keys()) last=k;
   topChatter=last==="none"?"none":last;
 }
+
 async function fetchAndCacheAvatar(login){
   const p=players.get(login);
   if(!p) return;
@@ -396,140 +473,138 @@ async function fetchAndCacheAvatar(login){
   if(!info){ console.error(`[avatar] helix user not found for ${login}`); return; }
   p.display=info.display_name||p.display;
   if(!info.profile_image_url){ console.error(`[avatar] no profile_image_url for ${login}`); return; }
+
   const outPath=`${AVATARS_DIR}/${login}_${AVATAR_SIZE}.rgb`;
   try{
     await execFFmpegToRGB(info.profile_image_url,outPath,AVATAR_SIZE);
     const buf=readRGB(outPath,AVATAR_SIZE);
-    if(buf){ p.avatarBuf=buf; console.error(`[avatar] cached ${login}`); }
+    if(buf){
+      p.avatarBuf=buf;
+      console.error(`[avatar] cached ${login}`);
+      // upgrade any existing in-round entity
+      for(let i=0;i<entities.length;i++){
+        const e=entities[i];
+        if(e && e.type==="player" && e.login===login){
+          e.imageBuf = p.avatarBuf;
+          e.imageSize = AVATAR_SIZE;
+        }
+      }
+    }
   }catch(e){
     console.error(`[avatar] ffmpeg failed for ${login}: ${e.message}`);
   }
 }
 
-// IRC chat
-function startTwitchChat(){
-  if(!TWITCH_OAUTH || !TWITCH_CHANNEL || !TWITCH_NICK){
-    console.error("[chat] disabled (missing TWITCH_OAUTH/TWITCH_CHANNEL/TWITCH_NICK)");
-    return;
-  }
-  const sock=tls.connect(6697,'irc.chat.twitch.tv',{rejectUnauthorized:false},()=>{
-    sock.write(`PASS ${TWITCH_OAUTH}\r\n`);
-    sock.write(`NICK ${TWITCH_NICK}\r\n`);
-    sock.write(`JOIN #${TWITCH_CHANNEL}\r\n`);
-    sock.write(`CAP REQ :twitch.tv/tags\r\n`);
-    console.error(`[chat] connected to #${TWITCH_CHANNEL} as ${TWITCH_NICK}`);
-  });
-
-  let acc="", printed=0;
-  sock.on('data',(d)=>{
-    acc += d.toString('utf8');
-    let idx;
-    while((idx=acc.indexOf('\r\n'))>=0){
-      let line=acc.slice(0,idx); acc=acc.slice(idx+2);
-
-      if(printed<30){ console.error("[chat:raw]", line); printed++; }
-
-      if(line.startsWith('PING')){ sock.write('PONG :tmi.twitch.tv\r\n'); continue; }
-      if(line[0]==='@'){ const sp=line.indexOf(' '); if(sp>0) line=line.slice(sp+1); }
-
-      const m=line.match(/^:([^!]+)![^ ]+ PRIVMSG #[^ ]+ :(.+)$/);
-      if(m){
-        const user=m[1].toLowerCase();
-        const msg=m[2].trim();
-        console.error(`[chat:msg] ${user}: ${msg}`);
-
-        if(msg.toLowerCase()==="me"){
-          if(players.has(user)){
-            console.error(`[join] ${user} already joined (ignored)`);
-          }else{
-            players.set(user,{login:user,display:user,avatarBuf:null,baseCol:colorFromName(user)});
-            console.error(`[join] ${user} joined queue`);
-            updateTopChatter();
-            fetchAndCacheAvatar(user).catch(e=>console.error("[avatar] error", e.message));
-          }
-        }
-      }
-    }
-  });
-  sock.on('error', e=>console.error('[chat] error', e.message));
-  sock.on('end', ()=>console.error('[chat] ended'));
-}
-startTwitchChat();
-
-// game entities
-function rand(a,b){ return a + Math.random()*(b-a); }
+// -------- game state --------
 let entities=[];
 let alive=[];
 let aliveCount=0;
 
-let state="PLAY";       // declared ONCE
+let state="PLAY";
 let t=0;
 let winFrames=0;
 let winner=null;
 
-function startRound(){
-  entities=[];
+function aliveCountryCount(){
+  let c=0;
+  for(let i=0;i<entities.length;i++){
+    if(alive[i] && entities[i].type==="country") c++;
+  }
+  return c;
+}
 
-  // countries first
+function normalizeSpeed(b, target){
+  const v = Math.hypot(b.vx, b.vy);
+  if(v < 1e-6){
+    const a = Math.random()*Math.PI*2;
+    b.vx = Math.cos(a)*target;
+    b.vy = Math.sin(a)*target;
+    return;
+  }
+  const s = target / v;
+  b.vx *= s;
+  b.vy *= s;
+}
+
+function addPlayerIntoCurrentRound(login){
+  const p = players.get(login);
+  if(!p) return;
+
+  // prevent duplicates in the same round entity list
+  for(let i=0;i<entities.length;i++){
+    const e=entities[i];
+    if(e && e.type==="player" && e.login===login && alive[i]) return;
+  }
+
+  if(!p.avatarBuf){
+    const cached = avatarRGB(p.login);
+    if(cached) p.avatarBuf = cached;
+  }
+
+  const a = Math.random()*Math.PI*2;
+  const e = {
+    type:"player",
+    login,
+    name:(p.display||p.login),
+    imageBuf:p.avatarBuf,
+    imageSize:AVATAR_SIZE,
+    baseCol:p.baseCol,
+    x: CX + (Math.random()*30-15),
+    y: CY + (Math.random()*30-15),
+    vx: Math.cos(a)*SPEED,
+    vy: Math.sin(a)*SPEED
+  };
+
+  entities.push(e);
+  alive.push(true);
+  aliveCount++;
+  console.error(`[inject] player "${login}" added (countriesLeft=${aliveCountryCount()})`);
+}
+
+function startRound(){
+  joinedThisRound = new Set(); // queue expires every new game
+  console.error("[round] new round: join list reset");
+
+  entities=[];
+  // countries
   for(const c of COUNTRIES){
     entities.push({
       type:"country",
       name:c.name,
+      iso2:c.iso2,
       imageBuf: flagRGB(c.iso2),
       imageSize: FLAG_SIZE,
-      baseCol:[50,70,110],
+      baseCol:[45,65,110],
       x:0,y:0,vx:0,vy:0
     });
   }
-  // players joined
-  for(const p of players.values()){
-    if(!p.avatarBuf){
-      const buf=avatarRGB(p.login);
-      if(buf) p.avatarBuf=buf;
-    }
-    entities.push({
-      type:"player",
-      name:p.display || p.login,
-      imageBuf:p.avatarBuf,
-      imageSize: AVATAR_SIZE,
-      baseCol:p.baseCol,
-      x:0,y:0,vx:0,vy:0
-    });
-  }
+  // players currently known (but they still must "join" each round to be injected;
+  // we DO NOT auto-add them at round start)
+  // So they only enter when chat condition becomes true.
 
   alive=new Array(entities.length).fill(true);
   aliveCount=entities.length;
 
-  const innerR = RING_R - R - 6;
-  const spacing = R * 1.65;
-  const sx = CX - innerR;
-  const sy = CY - innerR;
+  // cramped spawn: fill near center in a tight disc
+  const innerR = Math.max(40, RING_R - R - 30);
+  for(let i=0;i<entities.length;i++){
+    const e=entities[i];
+    const a=Math.random()*Math.PI*2;
+    const rr=Math.random()*innerR;
+    e.x = CX + Math.cos(a)*rr;
+    e.y = CY + Math.sin(a)*rr;
 
-  let idx=0;
-  for(let y=sy; y<=CY+innerR && idx<entities.length; y+=spacing){
-    for(let x=sx; x<=CX+innerR && idx<entities.length; x+=spacing){
-      const dx=x-CX, dy=y-CY;
-      if(dx*dx+dy*dy <= innerR*innerR){
-        const e=entities[idx++];
-        e.x = x + rand(-R*0.35, R*0.35);
-        e.y = y + rand(-R*0.35, R*0.35);
-        e.vx = rand(-SPEED,SPEED);
-        e.vy = rand(-SPEED,SPEED);
-      }
-    }
-  }
-  while(idx<entities.length){
-    const e=entities[idx++];
-    e.x = CX + rand(-innerR*0.15, innerR*0.15);
-    e.y = CY + rand(-innerR*0.15, innerR*0.15);
-    e.vx = rand(-SPEED,SPEED);
-    e.vy = rand(-SPEED,SPEED);
+    const dir=Math.random()*Math.PI*2;
+    e.vx = Math.cos(dir)*SPEED;
+    e.vy = Math.sin(dir)*SPEED;
   }
 
   winner=null;
   state="PLAY";
   t=0;
+  winFrames=0;
 }
+
 startRound();
 
 // collision grid
@@ -537,6 +612,7 @@ const cellSize=R*3;
 const gridW=Math.ceil(W/cellSize);
 const gridH=Math.ceil(H/cellSize);
 const grid=new Array(gridW*gridH);
+
 function gclear(){ grid.fill(null); }
 function gidx(x,y){
   const gx=Math.max(0,Math.min(gridW-1,(x/cellSize)|0));
@@ -550,9 +626,11 @@ function gpush(i,x,y){
 
 function stepPhysics(){
   t += dt;
-  const holeCenterDeg=(t*SPIN*180/Math.PI)%360;
+  const holeCenterDeg = (t*SPIN*180/Math.PI)%360;
 
   gclear();
+
+  // integrate
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
     const b=entities[i];
@@ -561,12 +639,16 @@ function stepPhysics(){
     gpush(i,b.x,b.y);
   }
 
-  const minD=2*R, minD2=minD*minD;
+  // collide
+  const minD=2*R;
+  const minD2=minD*minD;
+
   for(let gy=0; gy<gridH; gy++){
     for(let gx=0; gx<gridW; gx++){
       const base=gy*gridW+gx;
       const cell=grid[base];
       if(!cell) continue;
+
       for(let oy=-1; oy<=1; oy++){
         for(let ox=-1; ox<=1; ox++){
           const nx=gx+ox, ny=gy+oy;
@@ -580,7 +662,7 @@ function stepPhysics(){
 
             for(let bj=0; bj<other.length; bj++){
               const j=other[bj]; if(!alive[j]) continue;
-              if(base===(ny*gridW+nx) && j<=i) continue;
+              if((ny*gridW+nx)===base && j<=i) continue;
 
               const B=entities[j];
               const dx=B.x-A.x, dy=B.y-A.y;
@@ -590,16 +672,25 @@ function stepPhysics(){
                 const nxn=dx/d, nyn=dy/d;
                 const overlap=minD-d;
 
+                // separate
                 A.x -= nxn*overlap*0.5; A.y -= nyn*overlap*0.5;
                 B.x += nxn*overlap*0.5; B.y += nyn*overlap*0.5;
 
-                const rvx=B.vx-A.vx, rvy=B.vy-A.vy;
-                const vn=rvx*nxn + rvy*nyn;
-                if(vn<0){
-                  const imp=-vn;
-                  A.vx -= imp*nxn; A.vy -= imp*nyn;
-                  B.vx += imp*nxn; B.vy += imp*nyn;
-                }
+                // swap velocity along normal (elastic-ish)
+                const vax=A.vx, vay=A.vy;
+                const vbx=B.vx, vby=B.vy;
+
+                const van=vax*nxn + vay*nyn;
+                const vbn=vbx*nxn + vby*nyn;
+
+                const tax=vax - van*nxn, tay=vay - van*nyn;
+                const tbx=vbx - vbn*nxn, tby=vby - vbn*nyn;
+
+                // exchange normal components
+                A.vx = tax + vbn*nxn;
+                A.vy = tay + vbn*nyn;
+                B.vx = tbx + van*nxn;
+                B.vy = tby + van*nyn;
               }
             }
           }
@@ -608,7 +699,8 @@ function stepPhysics(){
     }
   }
 
-  const wallR=RING_R - R - 2;
+  // ring constraint + hole elimination
+  const wallR = RING_R - R - 3;
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
     const b=entities[i];
@@ -617,19 +709,25 @@ function stepPhysics(){
     const angDeg=(Math.atan2(dy,dx)*180/Math.PI+360)%360;
 
     if(dist>wallR){
-      if(inHole(angDeg,holeCenterDeg)){
-        alive[i]=false; aliveCount--; continue;
+      if(inHole(angDeg, holeCenterDeg)){
+        alive[i]=false; aliveCount--;
+        continue;
       }
       const nxn=dx/dist, nyn=dy/dist;
       b.x = CX + nxn*wallR;
       b.y = CY + nyn*wallR;
 
+      // reflect direction (speed normalized later)
       const vn=b.vx*nxn + b.vy*nyn;
-      if(vn>0){
-        b.vx -= 2*vn*nxn;
-        b.vy -= 2*vn*nyn;
-      }
+      b.vx -= 2*vn*nxn;
+      b.vy -= 2*vn*nyn;
     }
+  }
+
+  // **HARD RULE: fixed speed forever**
+  for(let i=0;i<entities.length;i++){
+    if(!alive[i]) continue;
+    normalizeSpeed(entities[i], SPEED);
   }
 
   return holeCenterDeg;
@@ -638,7 +736,9 @@ function stepPhysics(){
 function drawEntity(e){
   const x=e.x|0, y=e.y|0;
   drawBallBase(x,y,e.baseCol);
+
   if(e.imageBuf) blitSpriteInCircle(x,y,R,e.imageBuf,e.imageSize);
+
   drawNameUnderBall(x,y,e.name);
 }
 
@@ -652,22 +752,25 @@ function renderPlay(holeCenterDeg){
   drawTopUI(aliveCount, entities.length);
   drawJoinText();
   drawRing(holeCenterDeg);
+
   for(let i=0;i<entities.length;i++){
     if(alive[i]) drawEntity(entities[i]);
   }
 }
 
 function renderWin(){
-  fillSolid(8,10,18);
+  fillSolid(6,8,16);
   const panelW=Math.min(W-60,760), panelH=260;
-  const px=((W-panelW)/2)|0, py=65;
-  drawPanel(px,py,panelW,panelH,UI_BG,[100,140,190]);
-  drawTextCenteredShadow("WE HAVE A WINNER", W/2, py+45, 3);
+  const px=((W-panelW)/2)|0, py=75;
+  drawPanel(px,py,panelW,panelH,[18,26,46],[110,150,210]);
+
+  drawTextCenteredShadow("WOHOO WE HAVE A WINNER HERE", W/2, py+45, 2);
 
   if(winner){
     const box=96;
     const bx=(W/2 - box/2)|0;
     const by=(py+75)|0;
+
     fillRect(bx,by,box,box,[255,255,255]);
     rectOutline(bx,by,box,box,[0,0,0]);
 
@@ -682,16 +785,19 @@ function renderWin(){
         }
       }
     }
+
     drawTextCenteredShadow(winner.name, W/2, py+190, 2);
-    drawTextCenteredShadow(winner.type==="country"?"COUNTRY WINNER":"PLAYER WINNER", W/2, py+215, 1);
+    drawTextCenteredShadow(winner.type==="country" ? "COUNTRY WINNER" : "PLAYER WINNER", W/2, py+220, 1);
   }
 
-  drawTextCenteredShadow("NEXT ROUND STARTING...", W/2, py+panelH+38, 2);
+  drawTextCenteredShadow("NEXT ROUND STARTING...", W/2, py+panelH+40, 2);
 }
 
+// -------- game loop --------
 function tick(){
   if(state==="PLAY"){
     const holeCenterDeg=stepPhysics();
+
     if(aliveCount<=1){
       const wi=getWinnerIndex();
       const e=wi>=0?entities[wi]:null;
@@ -712,7 +818,7 @@ function tick(){
   }
 }
 
-// atomic ppm
+// -------- PPM output (atomic) --------
 const headerBuf=Buffer.from(`P6\n${W} ${H}\n255\n`);
 const frameBuf=Buffer.alloc(headerBuf.length + rgb.length);
 function writeFrameAtomic(){
@@ -721,7 +827,7 @@ function writeFrameAtomic(){
   return process.stdout.write(frameBuf);
 }
 
-// Write one boot frame immediately so ffmpeg can detect size even if later error occurs
+// Boot frame (so ffmpeg always detects size immediately)
 (function bootFrame(){
   clearBG();
   drawTextCenteredShadow("BOOTING...", W/2, H/2, 3);
@@ -739,16 +845,82 @@ function stepOnce(){
 }
 setInterval(stepOnce, Math.round(1000/FPS));
 
-// restart round when player count changes
-let lastPlayerCount=players.size;
-setInterval(()=>{
-  const pc=players.size;
-  if(pc!==lastPlayerCount){
-    console.error(`[round] players changed ${lastPlayerCount} -> ${pc}, restarting round`);
-    lastPlayerCount=pc;
-    startRound();
+// -------- Twitch chat (IRC) --------
+function startTwitchChat(){
+  if(!TWITCH_OAUTH || !TWITCH_CHANNEL || !TWITCH_NICK){
+    console.error("[chat] disabled (missing TWITCH_OAUTH/TWITCH_CHANNEL/TWITCH_NICK)");
+    return;
   }
-}, 1000);
+
+  const sock=tls.connect(6697,'irc.chat.twitch.tv',{rejectUnauthorized:false},()=>{
+    console.error(`[chat] connecting as nick="${TWITCH_NICK}" channel="#${TWITCH_CHANNEL}" oauth_prefix="${TWITCH_OAUTH.slice(0,5)}" oauth_len=${TWITCH_OAUTH.length}`);
+    sock.write(`PASS ${TWITCH_OAUTH}\r\n`);
+    sock.write(`NICK ${TWITCH_NICK}\r\n`);
+    sock.write(`CAP REQ :twitch.tv/tags\r\n`);
+    sock.write(`JOIN #${TWITCH_CHANNEL}\r\n`);
+    console.error(`[chat] sent JOIN #${TWITCH_CHANNEL}`);
+  });
+
+  let acc="", printed=0;
+  sock.on('data',(d)=>{
+    acc += d.toString('utf8');
+    let idx;
+    while((idx=acc.indexOf('\r\n'))>=0){
+      let line=acc.slice(0,idx); acc=acc.slice(idx+2);
+
+      if(printed<25){ console.error("[chat:raw]", line); printed++; }
+
+      if(line.startsWith('PING')){ sock.write('PONG :tmi.twitch.tv\r\n'); continue; }
+
+      // strip tags
+      if(line[0]==='@'){
+        const sp=line.indexOf(' ');
+        if(sp>0) line=line.slice(sp+1);
+      }
+
+      const m=line.match(/^:([^!]+)![^ ]+ PRIVMSG #[^ ]+ :(.+)$/);
+      if(m){
+        const user=m[1].toLowerCase();
+        const msg=m[2].trim();
+        console.error(`[chat:msg] ${user}: ${msg}`);
+
+        const cleaned = msg.toLowerCase();
+        const isJoin = (cleaned === "me") || (cleaned === user);
+
+        if(isJoin){
+          const countriesLeft = aliveCountryCount();
+
+          // join only when countries left < 10
+          if(countriesLeft >= 10){
+            console.error(`[join] ${user} blocked (countriesLeft=${countriesLeft} >= 10)`);
+            continue;
+          }
+
+          // once per round
+          if(joinedThisRound.has(user)){
+            console.error(`[join] ${user} already joined THIS round (ignored)`);
+            continue;
+          }
+
+          joinedThisRound.add(user);
+
+          if(!players.has(user)){
+            players.set(user,{login:user,display:user,avatarBuf:null,baseCol:colorFromName(user)});
+            fetchAndCacheAvatar(user).catch(e=>console.error("[avatar] error", e.message));
+          }
+
+          console.error(`[join] ${user} accepted (countriesLeft=${countriesLeft})`);
+          updateTopChatter();
+          addPlayerIntoCurrentRound(user);
+        }
+      }
+    }
+  });
+
+  sock.on('error', e=>console.error('[chat] error', e.message));
+  sock.on('end', ()=>console.error('[chat] ended'));
+}
+startTwitchChat();
 JS
 
 URL="rtmps://live.twitch.tv/app/${STREAM_KEY}"
