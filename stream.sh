@@ -13,7 +13,7 @@ set -euo pipefail
 export FPS="${FPS:-20}"
 export W="${W:-854}"
 export H="${H:-480}"
-
+export RESTART_SECONDS="${RESTART_SECONDS:-21000}"
 export BALL_R="${BALL_R:-14}"
 export RING_R="${RING_R:-160}"
 export HOLE_DEG="${HOLE_DEG:-70}"
@@ -101,7 +101,8 @@ const SPIN     = +process.env.SPIN || 0.9;
 const SPEED    = +process.env.SPEED || 100;
 const PHYS_MULT = +process.env.PHYS_MULT || 3;
 const WIN_SECONDS = +process.env.WIN_SCREEN_SECONDS || 6;
-
+const RESTART_SECONDS = +process.env.RESTART_SECONDS || 21000;
+const startMs = Date.now();
 const RING_THICKNESS = +process.env.RING_THICKNESS || 4;
 const RING_HOLE_EDGE = (+process.env.RING_HOLE_EDGE || 0) ? 1 : 0;
 
@@ -327,6 +328,14 @@ const COUNTRIES=loadCountries();
 console.error(`[countries] loaded ${COUNTRIES.length} unique countries from ${COUNTRIES_PATH}`);
 
 // ---- game state ----
+function fmtCountdown(sec){
+  sec = Math.max(0, sec|0);
+  const h = (sec/3600)|0;
+  const m = ((sec%3600)/60)|0;
+  const s = (sec%60)|0;
+  return `${h} hours ${m} minutes ${s} seconds till stream restarts`;
+}
+
 let entities=[], alive=[], aliveCount=0;
 let state="PLAY";
 let t=0;
@@ -449,8 +458,7 @@ function drawEntity(e){
 
 // ---- OLD-STYLE UI ----
 function drawTopUI(){
-  // Horizontal HUD row (top-left), cleaner (bigger scale)
-  const s = 2;        // scale 2 = less pixelated
+  const s = 2;
   const y = 10;
   let x = 14;
 
@@ -465,7 +473,13 @@ function drawTopUI(){
   x += textWidth(lastTxt, s) + 22;
 
   drawTextShadow(queueTxt, x, y, s);
+
+  // countdown line (below)
+  const elapsed = ((Date.now() - startMs)/1000)|0;
+  const left = RESTART_SECONDS - elapsed;
+  drawTextShadow(fmtCountdown(left), 14, y + (7*s + 8), 2);
 }
+
 
 
 function renderPlay(holeCenterDeg){
@@ -578,6 +592,7 @@ function getWinnerIndex(){
 }
 
 function tick(){
+
   if(state==="PLAY"){
     // spawn queued players ONLY when <10 countries alive
     while(aliveCountryCount() < 10 && joinQueue.length > 0){
