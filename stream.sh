@@ -27,8 +27,8 @@ download_flag () {
 }
 export -f download_flag
 
-# --- Pre-download all flags from your JSON ---
-echo "--- Syncing Flags from JSON ---"
+# --- Pre-download flags from JSON ---
+echo "--- Syncing Flags ---"
 grep -oP '"iso2":\s*"\K[^"]+' countries.json | xargs -P 8 -I {} bash -c 'download_flag "{}"'
 
 # --- Node.js Engine ---
@@ -61,7 +61,7 @@ function blit(cx,cy,rad,iso,sz){
   }
 }
 
-let ents=[], deadStack=[], winStats={}, state="PLAY", timer=0, lastWin="NONE", lastIso="un";
+let ents=[], deadStack=[], winStats={}, state="PLAY", timer=0, lastWin="NONE";
 const countries = JSON.parse(fs.readFileSync('countries.json', 'utf8'));
 
 function init(){
@@ -72,6 +72,7 @@ function init(){
 }
 
 function drawUI(){
+  // Header slots
   for(let i=0;i<3;i++) {
     const c = (i===0)? [25,25,30] : [40,40,45];
     for(let y=60;y<180;y++) for(let x=40+i*340;x<340+i*340;x++){
@@ -84,11 +85,13 @@ function drawUI(){
   drawT("LAST ONE WINS", 400, 110, 2, [255,255,255]);
   drawT("!67 = BAN", 760, 105, 4, [255, 50, 50]);
 
+  // Session Wins
   drawT("SESSION WINS", 40, 210, 2, [255,255,255]);
   Object.entries(winStats).sort((a,b)=>b[1]-a[1]).slice(0,5).forEach(([name, count], i) => {
     drawT(`${i+1}. ${name.substring(0,12)}: ${count}`, 40, 250 + i*35, 2, [255,255,200]);
   });
 
+  // Lose Area
   for(let y=1500;y<1880;y++) for(let x=0;x<W;x++){
     const idx=(y*W+x)*3; rgb[idx]=15; rgb[idx+1]=15; rgb[idx+2]=20;
   }
@@ -99,11 +102,13 @@ function drawUI(){
 }
 
 function loop(){
+  // Background color
   for(let i=0;i<rgb.length;i+=3){ rgb[i]=158; rgb[i+1]=100; rgb[i+2]=75; }
   const hDeg=(Date.now()/1000*1.2*60)%360;
   drawUI();
   
   if(state==="PLAY"){
+    // Thicker Ring
     for(let a=0;a<360;a+=0.3){
       let diff=Math.abs(((a-hDeg+180)%360)-180);
       if(diff<25)continue;
@@ -151,10 +156,11 @@ function loop(){
 
     let alive=ents.filter(e=>e.a && !e.f);
     if(alive.length===1){ 
-      state="WIN"; winner=alive[0]; lastWin=winner.n; lastIso=winner.i; timer=0;
+      state="WIN"; winner=alive[0]; lastWin=winner.n; timer=0;
       winStats[winner.n] = (winStats[winner.n]||0) + 1;
     }
   } else {
+    // Round Summary
     for(let y=400;y<1300;y++) for(let x=100;x<980;x++){
       const idx=(y*W+x)*3; rgb[idx]=30; rgb[idx+1]=45; rgb[idx+2]=95;
     }
@@ -169,12 +175,13 @@ init();
 setInterval(loop, 1000/FPS);
 JS
 
-# --- Final FFmpeg Loop ---
+# --- FFmpeg with Increased Bitrate and Threading ---
 while true; do
   node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel error -y \
     -f rawvideo -pixel_format rgb24 -video_size 1080x1920 -framerate 60 -i - \
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
-    -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
-    -g 120 -b:v 4500k -f flv "$YOUTUBE_URL"
+    -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p \
+    -x264-params "nal-hrd=cbr" -b:v 6000k -minrate 6000k -maxrate 6000k -bufsize 12000k \
+    -g 120 -f flv "$YOUTUBE_URL"
   sleep 2
 done
