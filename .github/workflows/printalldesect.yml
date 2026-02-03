@@ -1,0 +1,67 @@
+name: Print Secrets Table + Base64 (Debug Only)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  show-secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      - name: Display secrets table (plain + base64)
+        env:
+          STREAM_KEY:           ${{ secrets.STREAM_KEY }}
+          TWITCH_OAUTH:         ${{ secrets.TWITCH_OAUTH }}
+          TWITCH_CLIENT_ID:     ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          TWITCH_CHANNEL:       countryballer2134
+          TWITCH_NICK:          countryballer2134
+          YT_STREAM_KEY:        ${{ secrets.YT_STREAM_KEY }}
+          YT_CLIENT_ID:         ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET:     ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN:     ${{ secrets.YT_REFRESH_TOKEN }}
+          YT_LIVE_CHAT_ID:      ${{ secrets.YT_LIVE_CHAT_ID }}
+          # YT_VIDEO_ID:       ${{ secrets.YT_VIDEO_ID }}   # uncomment if you use it
+
+        run: |
+          echo ""
+          echo "══════════════════════════════════════════════════════════════════════"
+          echo "                  SECRETS / VARIABLES TABLE (DEBUG)"
+          echo "══════════════════════════════════════════════════════════════════════"
+          echo "| Name                   | Value preview             | Base64 (truncated)                  |"
+          echo "══════════════════════════════════════════════════════════════════════"
+
+          print_row() {
+            local name="$1"
+            local value="$2"
+            
+            if [ -z "$value" ]; then
+              preview="(empty)"
+              b64="(empty)"
+            else
+              preview="${value:0:24}${value:24:+…}"
+              b64=$(echo -n "$value" | base64 -w 0)
+              b64_display="${b64:0:36}${b64:36:+…}"
+            fi
+            
+            printf "│ %-22s │ %-25s │ %-35s │\n" "$name" "$preview" "${b64_display:-$b64}"
+          }
+
+          print_row "STREAM_KEY"           "$STREAM_KEY"
+          print_row "TWITCH_OAUTH"         "$TWITCH_OAUTH"
+          print_row "TWITCH_CLIENT_ID"     "$TWITCH_CLIENT_ID"
+          print_row "TWITCH_CLIENT_SECRET" "$TWITCH_CLIENT_SECRET"
+          print_row "TWITCH_CHANNEL"       "$TWITCH_CHANNEL"
+          print_row "TWITCH_NICK"          "$TWITCH_NICK"
+          print_row "YT_STREAM_KEY"        "$YT_STREAM_KEY"
+          print_row "YT_CLIENT_ID"         "$YT_CLIENT_ID"
+          print_row "YT_CLIENT_SECRET"     "$YT_CLIENT_SECRET"
+          print_row "YT_REFRESH_TOKEN"     "$YT_REFRESH_TOKEN"
+          print_row "YT_LIVE_CHAT_ID"      "$YT_LIVE_CHAT_ID"
+          # print_row "YT_VIDEO_ID"        "$YT_VIDEO_ID"
+
+          echo "══════════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "⚠️  This is visible in GitHub Actions logs — remove this job after use!"
+          echo ""
