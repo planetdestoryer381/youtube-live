@@ -5,17 +5,16 @@ set -euo pipefail
 # 🔑 CONFIG
 # =========================
 export YT_STREAM_KEY="u0d7-eetf-a97p-uer8-18ju"
-export FPS=20
+export FPS=60
 export W=1080
 export H=1920
 
-# Physics Tuning
+# Physics
 export BALL_R=25          
-export RING_R=350         
+export RING_R=380         
 export HOLE_DEG=70
-export SPIN=1.1            
-export BASE_SPEED=130      
-export RESTART_SECONDS=21000
+export SPIN=1.2
+export DT=0.0166  # 1/60th of a second
 
 # Flags
 export COUNTRIES_PATH="./countries.json"
@@ -24,10 +23,9 @@ export WIN_FLAG_SIZE=150
 export FLAGS_DIR="/tmp/flags"
 mkdir -p "$FLAGS_DIR"
 
-# YouTube URL
 YOUTUBE_URL="rtmps://a.rtmps.youtube.com/live2/${YT_STREAM_KEY}"
 
-# --- Flag Preparation (All 193+ countries) ---
+# --- Flag Preparation (All 193+) ---
 download_flag () {
   local iso="$1"
   local size="$2"
@@ -40,10 +38,8 @@ download_flag () {
   ffmpeg -hide_banner -loglevel error -y -i "$png" -vf "scale=${size}:${size}:flags=lanczos" -f rawvideo -pix_fmt rgb24 "$out_rgb" >/dev/null 2>&1 || true
 }
 
-echo "--- Preparing All Flags ---"
-# This now pulls every ISO2 from your json
+echo "--- Loading All 193+ Countries ---"
 ISO_LIST="$(grep -oE '"iso2"[[:space:]]*:[[:space:]]*"[^"]+"' "$COUNTRIES_PATH" | sed -E 's/.*"([a-zA-Z]{2})".*/\1/' | tr 'A-Z' 'a-z' | sort -u)"
-
 for iso in $ISO_LIST; do
   download_flag "$iso" "$FLAG_SIZE"
   download_flag "$iso" "$WIN_FLAG_SIZE"
@@ -53,12 +49,11 @@ done
 cat > /tmp/yt_sim.js <<'JS'
 const fs = require('fs');
 
-const W = 1080, H = 1920, FPS = 20;
-const R = 25, RING_R = 350, HOLE_DEG = 70;
-const SPIN = 1.1, DT = 1/FPS;
+const W = 1080, H = 1920, FPS = 60;
+const R = 25, RING_R = 380, HOLE_DEG = 70;
+const SPIN = 1.2, DT = 1/60;
 const CX = W/2, CY = H/2;
 const FLAGS_DIR = "/tmp/flags";
-const RESTART_TOTAL = +process.env.RESTART_SECONDS || 21000;
 const START_TIME = Date.now();
 
 const rgb = Buffer.alloc(W * H * 3);
@@ -106,33 +101,25 @@ let entities = [], lastWinner = "NONE", winnerIso = "un", state = "PLAY", winTim
 const countries = JSON.parse(fs.readFileSync("./countries.json", "utf8"));
 
 function init() {
-    // LOAD ALL 193+ COUNTRIES
     entities = countries.map(c => ({
         name: c.name, iso: c.iso2.toLowerCase(),
-        x: CX + (Math.random()-0.5)*250, y: CY + (Math.random()-0.5)*250,
-        vx: (Math.random()-0.5)*250, vy: (Math.random()-0.5)*250, alive: true
+        x: CX + (Math.random()-0.5)*300, y: CY + (Math.random()-0.5)*300,
+        vx: (Math.random()-0.5)*300, vy: (Math.random()-0.5)*300, alive: true
     }));
     state = "PLAY";
 }
 
 function loop() {
-    rgb.fill(12); 
+    rgb.fill(15); 
     const holeDeg = (Date.now()/1000 * SPIN * 60) % 360;
 
     if (state === "PLAY") {
         let aliveList = entities.filter(e => e.alive);
-        
-        // Timer & UI
-        const elapsed = Math.floor((Date.now() - START_TIME) / 1000);
-        const rem = Math.max(0, RESTART_TOTAL - elapsed);
-        const timeStr = `${Math.floor(rem/3600)}:${Math.floor((rem%3600)/60)}:${rem%60}`;
-
         drawText(`ALIVE: ${aliveList.length}/${entities.length}`, CX - 200, CY - RING_R - 180, 3, [255,255,255]);
         drawText(`LAST WIN: ${lastWinner}`, CX - 200, CY - RING_R - 130, 2, [180,180,180]);
-        drawText(`RESTART: ${timeStr}`, CX - 200, CY - RING_R - 95, 2, [100,255,100]);
         drawText("TYPE ME IN CHAT TO ENTER", CX - 240, CY + RING_R + 60, 2, [255,215,0]);
 
-        // Draw Ring
+        // Ring
         for (let a = 0; a < 360; a += 0.5) {
             let diff = Math.abs(((a - holeDeg + 180) % 360) - 180);
             if (diff < HOLE_DEG/2) continue;
@@ -155,8 +142,6 @@ function loop() {
                     b.x += nx * overlap/2; b.y += ny * overlap/2;
                 }
             }
-
-            // Wall Physics
             a.x += a.vx * DT; a.y += a.vy * DT;
             let dx = a.x-CX, dy = a.y-CY, dist = Math.sqrt(dx*dx + dy*dy);
             if (dist > RING_R - R) {
@@ -165,8 +150,8 @@ function loop() {
                 if (diff < HOLE_DEG/2) a.alive = false;
                 else {
                     const nx = dx/dist, ny = dy/dist, dot = a.vx*nx + a.vy*ny;
-                    a.vx = (a.vx - 2*dot*nx) * 1.08; // Boost on hit
-                    a.vy = (a.vy - 2*dot*ny) * 1.08;
+                    a.vx = (a.vx - 2*dot*nx) * 1.05;
+                    a.vy = (a.vy - 2*dot*ny) * 1.05;
                     a.x = CX + nx*(RING_R-R); a.y = CY + ny*(RING_R-R);
                 }
             }
@@ -191,16 +176,14 @@ init();
 setInterval(loop, 1000/FPS);
 JS
 
-# --- STABILIZED FFMPEG COMMAND ---
+# --- HIGH-SPEED INGEST FFMPEG ---
 while true; do
   node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel info -y \
+    -probesize 10M -analyzeduration 10M \
     -f image2pipe -vcodec ppm -r "$FPS" -i - \
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
     -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
-    -g $((FPS*2)) -b:v 4500k -maxrate 4500k -bufsize 9000k \
-    -c:a aac -b:a 128k -ar 44100 \
-    -f flv "$YOUTUBE_URL"
-  
-  echo "Stream dropped. Restarting in 5 seconds..."
+    -g 120 -b:v 6000k -maxrate 6000k -bufsize 12000k \
+    -c:a aac -b:a 128k -f flv "$YOUTUBE_URL"
   sleep 5
 done
