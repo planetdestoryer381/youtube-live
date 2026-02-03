@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e # Remove -u to prevent crashing on empty env variables
+set -e
 
 # =========================
 # 🔑 CONFIG
@@ -13,29 +13,26 @@ export H=1920
 export FLAGS_DIR="/tmp/flags"
 mkdir -p "$FLAGS_DIR"
 
-# --- Load Countries ---
+# --- Asset Loader ---
 download_flag () {
   local iso=$(echo "$1" | tr 'A-Z' 'a-z')
   local size="$2"
   local out_rgb="$FLAGS_DIR/${iso}_${size}.rgb"
   [ -s "$out_rgb" ] && return 0
   local png="$FLAGS_DIR/${iso}.png"
-  # Use flagcdn w160 for better quality on larger winners
   curl -fsSL "https://flagcdn.com/w160/${iso}.png" -o "$png" || return 0
   ffmpeg -loglevel error -y -i "$png" -vf "scale=${size}:${size}" -f rawvideo -pix_fmt rgb24 "$out_rgb" >/dev/null 2>&1 || true
 }
 
-echo "--- Loading Assets ---"
-# FIXED EXTRACTION
+echo "--- Building UI Assets ---"
 ISO_LIST=$(grep -oE '"iso2"[[:space:]]*:[[:space:]]*"[^"]+"' "./countries.json" | cut -d'"' -f4 | tr 'A-Z' 'a-z' | sort -u)
-
 for iso in $ISO_LIST; do
-  download_flag "$iso" "70"   
-  download_flag "$iso" "250"  
-  download_flag "$iso" "45"   
+  download_flag "$iso" "70"   # Gameplay balls
+  download_flag "$iso" "240"  # Winner Card
+  download_flag "$iso" "40"   # Staging/Leaderboard
 done
 
-# --- Node.js Engine ---
+# --- Node.js Engine (UI REPLICA) ---
 cat > /tmp/yt_sim.js <<'JS'
 const fs = require('fs');
 const W=1080, H=1920, FPS=30, R=35, RING_R=420, DT=1/30;
@@ -48,15 +45,11 @@ function setP(x,y,r,g,b){
   rgb[i]=r; rgb[i+1]=g; rgb[i+2]=b; 
 }
 
-function drawBackground() {
-  for(let y=0; y<H; y++) {
-    const r = 30, g = 30, b = 40; // Darker background for better contrast
-    for(let x=0; x<W; x++) setP(x,y,r,g,b);
-  }
+function drawRect(x1,y1,w,h,c){
+  for(let y=y1;y<y1+h;y++) for(let x=x1;x<x1+w;x++) setP(x,y,...c);
 }
 
-// Font and blit functions stay the same as your code...
-const FONT={'A':[14,17,17,31,17,17,17],'B':[30,17,30,17,17,17,30],'C':[14,17,16,16,16,17,14],'D':[30,17,17,17,17,17,30],'E':[31,16,30,16,16,16,31],'F':[31,16,30,16,16,16,16],'G':[14,17,16,23,17,17,14],'H':[17,17,17,31,17,17,17],'I':[14,4,4,4,4,4,14],'J':[7,2,2,2,2,18,12],'K':[17,18,20,24,20,18,17],'L':[16,16,16,16,16,16,31],'M':[17,27,21,17,17,17,17],'N':[17,25,21,19,17,17,17],'O':[14,17,17,17,17,17,14],'P':[30,17,17,30,16,16,16],'Q':[14,17,17,17,21,18,13],'R':[30,17,17,30,18,17,17],'S':[15,16,14,1,1,17,14],'T':[31,4,4,4,4,4,4],'U':[17,17,17,17,17,17,14],'V':[17,17,17,17,17,10,4],'W':[17,17,17,21,21,27,17],'X':[17,17,10,4,10,17,17],'Y':[17,17,10,4,4,4,4],'Z':[31,1,2,4,8,16,31],'0':[14,17,19,21,25,17,14],'1':[4,12,4,4,4,4,14],'2':[14,17,1,6,8,16,31],'3':[30,1,1,14,1,1,30],'4':[2,6,10,18,31,2,2],'5':[31,16,30,1,1,17,14],'6':[6,8,16,30,17,17,14],'7':[31,1,2,4,8,8,8],'8':[14,17,17,14,17,17,14],'9':[14,17,17,15,1,2,12],' ':[0,0,0,0,0,0,0],':':[0,4,0,0,4,0,0],'!':[4,4,4,4,0,0,4],'=':[0,0,31,0,31,0,0],'@':[14,17,21,21,22,16,15]};
+const FONT={'A':[14,17,17,31,17,17,17],'B':[30,17,30,17,17,17,30],'C':[14,17,16,16,16,17,14],'D':[30,17,17,17,17,17,30],'E':[31,16,30,16,16,16,31],'F':[31,16,30,16,16,16,16],'G':[14,17,16,23,17,17,14],'H':[17,17,17,31,17,17,17],'I':[14,4,4,4,4,4,14],'J':[7,2,2,2,2,18,12],'K':[17,18,20,24,20,18,17],'L':[16,16,16,16,16,16,31],'M':[17,27,21,17,17,17,17],'N':[17,25,21,19,17,17,17],'O':[14,17,17,17,17,17,14],'P':[30,17,17,30,16,16,16],'Q':[14,17,17,17,21,18,13],'R':[30,17,17,30,18,17,17],'S':[15,16,14,1,1,17,14],'T':[31,4,4,4,4,4,4],'U':[17,17,17,17,17,17,14],'V':[17,17,17,17,17,10,4],'W':[17,17,17,21,21,27,17],'X':[17,17,10,4,10,17,17],'Y':[17,17,10,4,4,4,4],'Z':[31,1,2,4,8,16,31],'0':[14,17,19,21,25,17,14],'1':[4,12,4,4,4,4,14],'2':[14,17,1,6,8,16,31],'3':[30,1,1,14,1,1,30],'4':[2,6,10,18,31,2,2],'5':[31,16,30,1,1,17,14],'6':[6,8,16,30,17,17,14],'7':[31,1,2,4,8,8,8],'8':[14,17,17,14,17,17,14],'9':[14,17,17,15,1,2,12],' ':[0,0,0,0,0,0,0],'.':[0,0,0,0,0,0,4],'!':[4,4,4,4,0,0,4],'=':[0,0,31,0,31,0,0],'@':[14,17,21,21,22,16,15]};
 function drawT(t,x,y,s,c){
   let cx=x; for(let char of (t||"").toString().toUpperCase()){
     const rows=FONT[char]||FONT[' '];
@@ -64,6 +57,7 @@ function drawT(t,x,y,s,c){
     cx+=6*s;
   }
 }
+
 function blit(cx,cy,rad,iso,sz){
   try {
     const b=fs.readFileSync(`${FLAGS_DIR}/${iso.toLowerCase()}_${sz}.rgb`);
@@ -75,12 +69,12 @@ function blit(cx,cy,rad,iso,sz){
   }catch(e){}
 }
 
-let ents=[], leaderboard={}, state="PLAY", timer=0, subs=12540; 
+let ents=[], leaderboard=[], state="PLAY", timer=0, subs=12543, lastWin="NONE"; 
 const countries=JSON.parse(fs.readFileSync("./countries.json","utf8"));
 
 function init(){
-  ents=countries.slice(0, 45).map(c=>({
-    n:c.name, i:c.iso2.toLowerCase(), 
+  ents=countries.sort(() => 0.5 - Math.random()).slice(0, 40).map(c=>({
+    n:c.name, i:c.iso2.toLowerCase(), cap:c.capital||"Unknown",
     x:CX+(Math.random()-0.5)*200, y:CY+(Math.random()-0.5)*200,
     vx:(Math.random()-0.5)*700, vy:(Math.random()-0.5)*700, a:true
   }));
@@ -88,28 +82,45 @@ function init(){
 }
 
 function drawUI() {
-  drawT("@VeryGoodYouTuber", 50, 50, 3, [255,255,255]);
-  drawT(`${subs.toLocaleString()}`, 50, 100, 5, [255,255,255]);
-  drawT("!67 = BAN", 700, 80, 5, [255, 50, 50]);
+  // Top Header Bar
+  drawRect(50, 60, 980, 140, [30, 25, 20]);
+  drawT("LAST WINNER", 80, 85, 2, [180, 180, 180]);
+  drawT(lastWin, 80, 120, 3, [255, 255, 255]);
+  drawT("MODE", 480, 85, 2, [180, 180, 180]);
+  drawT("LAST ONE WINS", 420, 120, 3, [255, 255, 255]);
+  
+  // Subscriber Count (Corrected)
+  drawT("@VeryGoodYouTuber", 50, 220, 3, [255,255,255]);
+  drawT(`${subs.toLocaleString()} SUBS`, 50, 260, 5, [255,255,0]);
+
+  // BAN TEXT (Top Right)
+  drawT("!67 = BAN", 700, 240, 6, [255, 40, 40]);
+
+  // Bottom Staging Area (Flags waiting)
+  drawRect(0, 1450, 1080, 470, [20, 20, 25]);
+  countries.slice(0, 120).forEach((c, idx) => {
+    let row = Math.floor(idx / 15), col = idx % 15;
+    blit(60 + col * 68, 1500 + row * 60, 20, c.iso2, 40);
+  });
 }
 
 function loop(){
-  drawBackground();
+  // Background matches image 3
+  drawRect(0, 0, W, H, [140, 80, 50]); 
   const hDeg=(Date.now()/1000*1.1*60)%360;
   drawUI();
   
   if(state==="PLAY"){
-    // Draw Ring
+    // Ring
     for(let a=0;a<360;a+=0.2){
       let diff=Math.abs(((a-hDeg+180)%360)-180);
       if(diff<25)continue;
       const r=a*Math.PI/180;
-      for(let t=-5;t<5;t++) setP(CX+(RING_R+t)*Math.cos(r),CY+(RING_R+t)*Math.sin(r),255,255,255);
+      for(let t=-4;t<4;t++) setP(CX+(RING_R+t)*Math.cos(r),CY+(RING_R+t)*Math.sin(r),255,255,255);
     }
 
     ents.forEach((e, i) => {
       if(!e.a) return;
-      // Physics
       for(let j=i+1; j<ents.length; j++){
         let b = ents[j]; if(!b.a) continue;
         let dx=b.x-e.x, dy=b.y-e.y, d=Math.sqrt(dx*dx+dy*dy);
@@ -137,16 +148,23 @@ function loop(){
 
     let alive=ents.filter(e=>e.a);
     if(alive.length === 1){ 
-      const w=alive[0];
-      if(!leaderboard[w.i]) leaderboard[w.i] = {n:w.n, count:0};
-      leaderboard[w.i].count++;
-      state="WIN"; winner=w.n; wIso=w.i; timer=0; 
-      subs += Math.floor(Math.random()*5);
+      state="WIN"; winner=alive[0]; lastWin=winner.n; timer=0; 
+      subs += Math.floor(Math.random()*3);
     }
   } else {
-    drawT("WINNER", CX-180, CY-500, 10, [255, 230, 0]);
-    blit(CX, CY, 125, wIso, 250);
-    drawT(winner, CX-(winner.length*20), CY+280, 6, [255,255,255]);
+    // Replica of Round Summary (Image 2)
+    drawRect(100, 400, 880, 900, [35, 45, 80]); // Blue Box
+    drawRect(120, 420, 840, 120, [20, 20, 30]); // Header
+    drawT("ROUND SUMMARY", 280, 450, 5, [255, 255, 255]);
+    
+    // Winner Card Inside Summary
+    drawRect(140, 800, 800, 450, [25, 30, 55]);
+    blit(320, 1020, 120, winner.i, 240);
+    drawT("WINNER", 600, 820, 3, [180, 180, 255]);
+    drawT(winner.n, 600, 880, 4, [255, 255, 255]);
+    drawT(`CAPITAL: ${winner.cap}`, 600, 960, 2, [200, 200, 200]);
+    drawT(`ISO: ${winner.i.toUpperCase()}`, 600, 1020, 2, [200, 200, 200]);
+
     if(++timer > 150) init();
   }
   process.stdout.write(rgb);
@@ -155,12 +173,12 @@ init();
 setInterval(loop, 1000/FPS);
 JS
 
-# --- FFmpeg Command ---
+# --- FFmpeg Execution ---
 while true; do
-  node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel info -y \
+  node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel error -y \
     -f rawvideo -pixel_format rgb24 -video_size 1080x1920 -framerate "$FPS" -i - \
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
     -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
-    -g 60 -b:v 3500k -maxrate 3500k -bufsize 7000k -f flv "$YOUTUBE_URL"
-  sleep 3
+    -g 60 -b:v 3500k -f flv "$YOUTUBE_URL"
+  sleep 2
 done
