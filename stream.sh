@@ -13,12 +13,12 @@ export H=1920
 export FLAGS_DIR="/tmp/flags"
 mkdir -p "$FLAGS_DIR"
 
-# --- Asset Loader (Big Flags) ---
+# --- Stubborn Asset Loader ---
 download_flag () {
   local iso=$(echo "$1" | tr 'A-Z' 'a-z')
   [ -s "$FLAGS_DIR/${iso}_90.rgb" ] && return 0
   local png="$FLAGS_DIR/${iso}.png"
-  if curl --retry 3 --retry-delay 2 -m 10 -fsSL "https://flagcdn.com/w160/${iso}.png" -o "$png"; then
+  if curl --retry 5 --retry-delay 2 -m 15 -fsSL "https://flagcdn.com/w160/${iso}.png" -o "$png"; then
     ffmpeg -loglevel error -y -i "$png" -vf "scale=90:90" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_90.rgb" || true
     ffmpeg -loglevel error -y -i "$png" -vf "scale=42:42" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_42.rgb" || true
     ffmpeg -loglevel error -y -i "$png" -vf "scale=240:240" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_240.rgb" || true
@@ -27,15 +27,23 @@ download_flag () {
 }
 export -f download_flag
 
-echo "--- Syncing Big Flags ---"
-grep -oP '"iso2":\s*"\K[^"]+' countries.json | xargs -P 5 -I {} bash -c 'download_flag "{}"'
+echo "--- Step 1: Downloading 193 Flags ---"
+grep -oP '"iso2":\s*"\K[^"]+' countries.json | xargs -P 8 -I {} bash -c 'download_flag "{}"'
 
-# --- Node.js Graphics Engine ---
+# --- Pre-flight Check ---
+COUNT=$(ls -1 $FLAGS_DIR/*_90.rgb 2>/dev/null | wc -l)
+echo "--- Verified: $COUNT flags ready. ---"
+if [ "$COUNT" -lt 150 ]; then
+  echo "Error: Not enough flags downloaded to start a stable stream. Re-run script."
+  exit 1
+fi
+
+# --- Step 2: Graphics Engine ---
 cat > /tmp/yt_sim.js <<'JS'
 const fs = require('fs');
 const W=1080, H=1920, FPS=60, DT=1/60;
-const R=36, RING_R=380; // 2x Bigger Balls
-const CX=W/2, CY=650;   // Lowered slightly to fit the leaderboard
+const R=36, RING_R=380; 
+const CX=W/2, CY=650;   
 const FLAGS_DIR="/tmp/flags";
 const rgb = Buffer.alloc(W * H * 3);
 
@@ -51,18 +59,18 @@ function drawT(t,x,y,s,c){
   }
 }
 
-function blit(cx,cy,rad,iso,sz,full=true){
+const flagCache = {};
+function blit(cx,cy,rad,iso,sz,isFull){
   const k=`${iso}_${sz}`; if(!flagCache[k]) try{flagCache[k]=fs.readFileSync(`${FLAGS_DIR}/${iso}_${sz}.rgb`)}catch(e){return};
   const b=flagCache[k], x0=Math.floor(cx-sz/2), y0=Math.floor(cy-sz/2);
   for(let y=0;y<sz;y++) for(let x=0;x<sz;x++){
-    if(full){ if((x-sz/2)**2+(y-sz/2)**2 > (sz/2)**2) continue; }
+    if(isFull){ if((x-sz/2)**2+(y-sz/2)**2 > (sz/2)**2) continue; }
     else { if((x-sz/2)**2+(y-sz/2)**2 > rad**2) continue; }
     const si=(y*sz+x)*3, di=((y0+y)*W+(x0+x))*3;
     if(di>=0 && di<rgb.length-3){ rgb[di]=b[si]; rgb[di+1]=b[si+1]; rgb[di+2]=b[si+2]; }
   }
 }
 
-const flagCache = {};
 let ents=[], deadStack=[], winStats={}, state="PLAY", timer=0, lastWin="NONE";
 const countries = JSON.parse(fs.readFileSync('countries.json', 'utf8'));
 
@@ -74,10 +82,9 @@ function init(){
 }
 
 function drawUI(){
-  // Connected Top Bar
-  const barC = [25, 25, 30];
+  // Connected Black Top Bar
   for(let y=40;y<160;y++) for(let x=40;x<W-40;x++){
-    const idx=(y*W+x)*3; rgb[idx]=barC[0]; rgb[idx+1]=barC[1]; rgb[idx+2]=barC[2];
+    const idx=(y*W+x)*3; rgb[idx]=25; rgb[idx+1]=25; rgb[idx+2]=30;
   }
   drawT("LAST WINNER", 80, 65, 1, [150,150,150]);
   drawT(lastWin.substring(0,15), 80, 95, 2, [255,255,255]);
@@ -85,20 +92,20 @@ function drawUI(){
   drawT(ents.filter(e=>!e.f).length.toString(), 480, 95, 2, [255,255,255]);
   drawT("!67 = BAN", 780, 85, 4, [255, 60, 60]);
 
-  // Leaderboard Area
+  // Leaderboard System
   for(let y=170;y<380;y++) for(let x=40;x<W-40;x++){
     const idx=(y*W+x)*3; rgb[idx]=15; rgb[idx+1]=15; rgb[idx+2]=20;
   }
-  drawT("SESSION LEADERBOARD", 60, 190, 2, [255,255,100]);
+  drawT("LEADERBOARD", 60, 190, 2, [255,255,100]);
   const leaders = Object.entries(winStats).sort((a,b)=>b[1]-a[1]).slice(0,5);
   leaders.forEach(([name, wins], i) => {
     drawT(`${i+1}. ${name.substring(0,18)}`, 60, 235 + i*28, 1, [200,200,200]);
     drawT(wins.toString(), 950, 235 + i*28, 1, [255,255,255]);
   });
 
-  // Bottom Death Grid
+  // Lose Area Grid
   for(let y=1150;y<1920;y++) for(let x=0;x<W;x++){
-    const idx=(y*W+x)*3; rgb[idx]=10; rgb[idx+1]=10; rgb[idx+1]=12;
+    const idx=(y*W+x)*3; rgb[idx]=10; rgb[idx+1]=10; rgb[idx+2]=12;
   }
   deadStack.forEach((e, idx) => {
     const col=idx%11, row=Math.floor(idx/11);
@@ -107,12 +114,13 @@ function drawUI(){
 }
 
 function loop(){
+  // Soil-brown background
   for(let i=0;i<rgb.length;i+=3){ rgb[i]=165; rgb[i+1]=110; rgb[i+2]=85; }
   const hDeg=(Date.now()/1000*1.5*60)%360;
   drawUI();
   
   if(state==="PLAY"){
-    // Arena
+    // Rotating Arena Circle
     for(let a=0;a<360;a+=0.4){
       let diff=Math.abs(((a-hDeg+180)%360)-180);
       if(diff<22) continue; 
@@ -131,7 +139,6 @@ function loop(){
         blit(e.x, e.y, 18, e.i, 42, false);
         return;
       }
-      // Physics
       for(let j=i+1;j<ents.length;j++){
         let b=ents[j]; if(b.f) continue;
         let dx=b.x-e.x, dy=b.y-e.y, d=Math.sqrt(dx*dx+dy*dy);
@@ -163,7 +170,7 @@ function loop(){
       winStats[winner.n] = (winStats[winner.n]||0) + 1;
     }
   } else {
-    // Win Card
+    // Round Summary
     for(let y=450;y<950;y++) for(let x=150;x<930;x++){
       const idx=(y*W+x)*3; rgb[idx]=25; rgb[idx+1]=35; rgb[idx+2]=80;
     }
@@ -178,13 +185,16 @@ init();
 setInterval(loop, 1000/FPS);
 JS
 
-# --- FFmpeg Command ---
+# --- Step 3: Reliable Stream ---
 while true; do
+  echo "--- Starting Stream Handshake ---"
   node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel error -y \
     -f rawvideo -pixel_format rgb24 -video_size 1080x1920 -framerate 60 -i - \
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
     -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p \
-    -x264-params "nal-hrd=cbr" -b:v 6000k -minrate 6000k -maxrate 6000k -bufsize 12000k \
-    -g 120 -f flv "$YOUTUBE_URL"
-  sleep 2
+    -x264-params "keyint=120:min-keyint=120:scenecut=0" \
+    -b:v 6000k -minrate 6000k -maxrate 6000k -bufsize 12000k \
+    -f flv "$YOUTUBE_URL"
+  echo "--- Stream closed. Retrying in 5 seconds... ---"
+  sleep 5
 done
