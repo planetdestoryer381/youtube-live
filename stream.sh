@@ -14,8 +14,8 @@ export W=1080
 export H=1920
 
 # Game / physics defaults (tweak later if you want)
-export BALL_R=10
-export RING_R=200
+export BALL_R=30
+export RING_R=300
 export HOLE_DEG=70
 export SPIN=0.9
 export SPEED=100
@@ -28,7 +28,7 @@ export RING_HOLE_EDGE=1
 
 # Flags
 export COUNTRIES_PATH="./countries.json"
-export FLAG_SIZE=26
+export FLAG_SIZE=60
 export FLAGS_DIR="/tmp/flags"
 mkdir -p "$FLAGS_DIR"
 
@@ -315,12 +315,14 @@ function drawRing(holeCenterDeg){
 function drawUI(){
   const s = 2;
 
-  // left of circle
-  const textX = Math.max(10, (CX - RING_R - 220) | 0);
-
-  // vertically centered around circle
+  // Put UI ABOVE the circle (safe on phones)
   const lineH = 7*s + 10;
-  const baseY = (CY - lineH*1.5) | 0;
+
+  // left aligned starting near the ring's left edge
+  const textX = Math.max(14, (CX - RING_R) | 0);
+
+  // above the ring (4 lines tall + padding)
+  const baseY = Math.max(14, (CY - RING_R - (lineH*4 + 18)) | 0);
 
   drawTextShadow(`ALIVE: ${aliveCount}/${entities.length}`, textX, baseY, s);
   drawTextShadow(`LAST WIN: ${String(lastWinner).toUpperCase().slice(0,18)}`, textX, baseY + lineH, s);
