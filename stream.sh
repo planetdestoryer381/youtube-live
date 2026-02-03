@@ -13,8 +13,7 @@ export H=1920
 export FLAGS_DIR="/tmp/flags"
 mkdir -p "$FLAGS_DIR"
 
-# --- 🛑 THE STREAM CHECK RULE 🛑 ---
-# Verifies assets and network BEFORE anything else runs
+# --- 🛑 UPDATED STREAM CHECK RULE 🛑 ---
 check_readiness() {
   echo "--- RULE: CHECKING STREAM READINESS ---"
   
@@ -22,16 +21,19 @@ check_readiness() {
   local count=$(ls -1 $FLAGS_DIR/*_40.rgb 2>/dev/null | wc -l)
   if [ "$count" -lt 180 ]; then
      echo "Assets missing. Syncing flags..."
+     # Ensure we have countries.json before syncing
+     if [ ! -f "countries.json" ]; then echo "Error: countries.json not found!"; exit 1; fi
      grep -oP '"iso2":\s*"\K[^"]+' countries.json | xargs -P 8 -I {} bash -c 'download_flag "{}"'
   fi
 
-  # 2. Check YouTube Connection
-  if ! curl --connect-timeout 5 -I "https://a.rtmp.youtube.com" > /dev/null 2>&1; then
-    echo "YouTube RTMP server not reachable. Check your connection."
+  # 2. Flexible Connection Check
+  # We check if we can resolve the name and ping Google instead of a direct RTMP curl
+  if ! ping -c 1 8.8.8.8 > /dev/null 2>&1; then
+    echo "!! INTERNET DOWN: Cannot reach Google DNS (8.8.8.8)."
     return 1
   fi
 
-  echo "STREAM STATUS: READY TO BROADCAST"
+  echo "STREAM STATUS: READY"
   return 0
 }
 
@@ -48,13 +50,10 @@ download_flag () {
 }
 export -f download_flag
 
-# --- Graphics Engine ---
+# --- Graphics Engine (Mobile Optimized Layout) ---
 cat > /tmp/yt_sim.js <<'JS'
 const fs=require('fs');const W=1080,H=1920,FPS=60,DT=1/60;
-const R=16, RING_R=125;
-const CX=W/2;
-// 1. Circle moved slightly down (~40px)
-const CY=760; 
+const R=16, RING_R=125, CX=W/2, CY=760; 
 const FLAGS_DIR="/tmp/flags";
 const rgb=Buffer.alloc(W*H*3);
 
@@ -65,25 +64,20 @@ const flagCache={};function blit(cx,cy,iso,sz,clipRad){const k=`${iso}_${sz}`;if
 let ents=[],deadStack=[],winStats={},state="PLAY",timer=0,lastWin="NONE";const countries=JSON.parse(fs.readFileSync('countries.json','utf8'));
 function init(){ents=countries.sort(()=>0.5-Math.random()).map(c=>({n:c.name,i:c.iso2.toLowerCase(),x:CX,y:CY,vx:(Math.random()-0.5)*1000,vy:(Math.random()-0.5)*1000,f:false}));deadStack=[];state="PLAY";}
 function drawUI(){
-  // 2. Moved GUI Directly above the circle
   for(let y=440;y<560;y++)for(let x=200;x<W-200;x++){const idx=(y*W+x)*3;rgb[idx]=25;rgb[idx+1]=25;rgb[idx+2]=30;}
   drawT("LAST WINNER",240,460,1,[150,150,150]);drawT(lastWin.substring(0,14),240,490,2,[255,255,255]);
   drawT("ALIVE",480,460,1,[150,150,150]);drawT(ents.filter(e=>!e.f).length.toString(),480,490,2,[255,255,255]);
   drawT("!67=BAN",700,475,4,[255,50,50]);
-
-  // Leaderboard moved to integrate with gameplay view
   for(let y=150;y<420;y++)for(let x=200;x<W-200;x++){const idx=(y*W+x)*3;rgb[idx]=15;rgb[idx+1]=15;rgb[idx+2]=20;}
   drawT("LEADERBOARD",240,170,3,[255,255,100]);
   const l=Object.entries(winStats).sort((a,b)=>b[1]-a[1]).slice(0,5);
   l.forEach(([n,w],i)=>{drawT(`${i+1}.${n.substring(0,14)}`,240,225+i*35,2,[220,220,220]);drawT(w.toString(),750,225+i*35,2,[255,255,255]);});
-
-  // Small Lose Area Grid (bottom)
   for(let y=1100;y<1920;y++)for(let x=0;x<W;x++){const idx=(y*W+x)*3;rgb[idx]=10;rgb[idx+1]=10;rgb[idx+2]=15;}
   deadStack.forEach((e,idx)=>{const col=idx%20,row=Math.floor(idx/20);blit(45+col*52,1150+row*35,e.i,24,12);});
 }
 function loop(){
   for(let i=0;i<rgb.length;i+=3){rgb[i]=165;rgb[i+1]=110;rgb[i+2]=85;}
-  const hDeg=(Date.now()/1000*1.5*FPS)%360;drawUI();
+  const hDeg=(Date.now()/1000*1.5*60)%360;drawUI();
   if(state==="PLAY"){
     for(let a=0;a<360;a+=0.5){let diff=Math.abs(((a-hDeg+180)%360)-180);if(diff<22)continue;const r=a*Math.PI/180;for(let t=-6;t<6;t++){const px=Math.floor(CX+(RING_R+t)*Math.cos(r)),py=Math.floor(CY+(RING_R+t)*Math.sin(r));if(px>=0&&px<W&&py>=0&&py<H){const idx=(py*W+px)*3;rgb[idx]=255;rgb[idx+1]=255;rgb[idx+2]=255;}}}
     ents.forEach((e,i)=>{if(e.f){const ti=deadStack.indexOf(e);const tx=45+(ti%20)*52,ty=1150+Math.floor(ti/20)*35;e.x+=(tx-e.x)*0.2;e.y+=(ty-e.y)*0.2;blit(e.x,e.y,e.i,24,12);return;}
@@ -100,14 +94,16 @@ JS
 
 # --- MAIN LOOP ---
 while true; do
-  # Rule: Check if stream is gonna work before sending
   if check_readiness; then
+    echo "Connection verified. Launching FFmpeg..."
     node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel error -y \
       -f rawvideo -pixel_format rgb24 -video_size 1080x1920 -framerate 60 -i - \
       -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
       -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
       -g 120 -b:v 8000k -minrate 8000k -maxrate 8000k -bufsize 16000k \
       -f flv "$YOUTUBE_URL"
+  else
+    echo "Waiting for connection..."
   fi
   sleep 5
 done
