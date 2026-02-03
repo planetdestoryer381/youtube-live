@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${STREAM_KEY:?Missing STREAM_KEY (set as GitHub Secret)}"
+: "${STREAM_KEY:?Missing STREAM_KEY (Twitch)}"
+: "${YT_STREAM_KEY:?Missing YT_STREAM_KEY (YouTube)}"
 
+# Twitch chat (optional but required if you want "me" join on Twitch)
 : "${TWITCH_OAUTH:=}"     # oauth:xxxxx
 : "${TWITCH_CHANNEL:=}"   # without '#'
 : "${TWITCH_NICK:=}"      # login
+
+# YouTube chat (optional but required if you want "me" join on YouTube)
+: "${YT_ACCESS_TOKEN:=}"  # OAuth access token
+: "${YT_LIVE_CHAT_ID:=}"  # easiest path: provide directly
+: "${YT_VIDEO_ID:=}"      # optional alternative: provide video id (needs access token)
 
 export FPS="${FPS:-20}"
 export W="${W:-854}"
@@ -28,17 +35,16 @@ export FLAG_SIZE="${FLAG_SIZE:-26}"
 export FLAGS_DIR="${FLAGS_DIR:-/tmp/flags}"
 mkdir -p "$FLAGS_DIR"
 
-URL="rtmps://live.twitch.tv/app/${STREAM_KEY}"
+TWITCH_URL="rtmps://live.twitch.tv/app/${STREAM_KEY}"
+YOUTUBE_URL="rtmps://a.rtmps.youtube.com/live2/${YT_STREAM_KEY}"
 
-echo "=== GAME SETTINGS ==="
-echo "FPS=$FPS SIZE=${W}x${H} BALL_R=$BALL_R RING_R=$RING_R HOLE_DEG=$HOLE_DEG SPIN=$SPIN SPEED=$SPEED PHYS_MULT=$PHYS_MULT"
-echo "RESTART_SECONDS=$RESTART_SECONDS WIN_SCREEN_SECONDS=$WIN_SCREEN_SECONDS"
-echo "RING_THICKNESS=$RING_THICKNESS RING_HOLE_EDGE=$RING_HOLE_EDGE"
-echo "COUNTRIES_PATH=$COUNTRIES_PATH FLAG_SIZE=$FLAG_SIZE FLAGS_DIR=$FLAGS_DIR"
-echo "TWITCH_CHAT: $([ -n "${TWITCH_OAUTH}" ] && [ -n "${TWITCH_CHANNEL}" ] && [ -n "${TWITCH_NICK}" ] && echo enabled || echo disabled)"
+echo "=== DUAL STREAM SETTINGS ==="
+echo "FPS=$FPS SIZE=${W}x${H}"
+echo "TWITCH_URL=rtmps://live.twitch.tv/app/****"
+echo "YOUTUBE_URL=rtmps://a.rtmps.youtube.com/live2/****"
 node -v
 ffmpeg -version | head -n 2
-echo "====================="
+echo "============================"
 
 download_flag () {
   local iso="$1"
@@ -68,10 +74,12 @@ for iso in $ISO_LIST; do
 done
 echo "[flags] prepared (iso2 unique): $COUNT"
 
-cat > /tmp/sim.js <<'JS'
+# ---------- shared game engine (supports Twitch OR YouTube chat) ----------
+cat > /tmp/sim_dual.js <<'JS'
 'use strict';
 const fs = require('fs');
 const tls = require('tls');
+const https = require('https');
 
 process.stdout.on("error", (e) => {
   if (e && e.code === "EPIPE") {
@@ -101,9 +109,17 @@ const COUNTRIES_PATH = process.env.COUNTRIES_PATH || "./countries.json";
 const FLAGS_DIR = process.env.FLAGS_DIR || "/tmp/flags";
 const FLAG_SIZE = +process.env.FLAG_SIZE || 26;
 
+// which chat to use for this instance
+// CHAT_PROVIDER=twitch or youtube
+const CHAT_PROVIDER = (process.env.CHAT_PROVIDER || "").toLowerCase();
+
 const TWITCH_OAUTH   = process.env.TWITCH_OAUTH || "";
 const TWITCH_CHANNEL = (process.env.TWITCH_CHANNEL || "").toLowerCase();
 const TWITCH_NICK    = (process.env.TWITCH_NICK || "").toLowerCase();
+
+const YT_ACCESS_TOKEN = process.env.YT_ACCESS_TOKEN || "";
+const YT_LIVE_CHAT_ID = process.env.YT_LIVE_CHAT_ID || "";
+const YT_VIDEO_ID     = process.env.YT_VIDEO_ID || "";
 
 const CX = W*0.5, CY = H*0.5;
 const dt = (PHYS_MULT) / FPS;
@@ -118,11 +134,9 @@ function setPix(x,y,r,g,b){
 function fillSolid(r,g,b){
   for(let i=0;i<rgb.length;i+=3){ rgb[i]=r; rgb[i+1]=g; rgb[i+2]=b; }
 }
-function clearBG(){
-  fillSolid(10,14,28); // dark so white text pops
-}
+function clearBG(){ fillSolid(10,14,28); }
 
-// tiny font
+// tiny font (unchanged)
 const FONT={
   'A':[0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
   'B':[0b11110,0b10001,0b11110,0b10001,0b10001,0b10001,0b11110],
@@ -256,7 +270,7 @@ function inHole(angleDeg, holeCenterDeg){
   return Math.abs(d)<=half;
 }
 
-// smooth ring
+// smooth ring (unchanged)
 function drawRing(holeCenterDeg){
   const thickness = Math.max(1.5, (RING_THICKNESS||4) * 0.55);
   const inner = RING_R - thickness;
@@ -285,7 +299,6 @@ function drawRing(holeCenterDeg){
     blendPix(x0+1, y0+1, v, a*w11);
   }
 
-  // body
   for(let deg=0; deg<360; deg+=0.22){
     if(inHole(deg, holeCenterDeg)) continue;
     const a = deg*Math.PI/180;
@@ -297,7 +310,6 @@ function drawRing(holeCenterDeg){
     }
   }
 
-  // subtle outline
   const outlineV = 35;
   for(let deg=0; deg<360; deg+=0.8){
     if(inHole(deg, holeCenterDeg)) continue;
@@ -307,7 +319,6 @@ function drawRing(holeCenterDeg){
     splat(CX + ca*(inner-1.0), CY + sa*(inner-1.0), outlineV, 0.55);
   }
 
-  // hole glow
   if(RING_HOLE_EDGE){
     const edgeA = (holeCenterDeg - HOLE_DEG/2);
     const edgeB = (holeCenterDeg + HOLE_DEG/2);
@@ -356,10 +367,13 @@ let winFrames=0;
 let winner=null;
 let lastWinner="none";
 
-// chat join queue (persist)
+// join queue
 let joinQueue = [];
 let joinQueued = new Set();
 let playerActive = new Set();
+
+const MAX_QUEUE = +process.env.MAX_QUEUE || 200;
+const MAX_SPAWN_PER_TICK = +process.env.MAX_SPAWN_PER_TICK || 3;
 
 function aliveCountryCount(){
   let c=0;
@@ -371,7 +385,6 @@ function aliveCountryCount(){
 
 function startRound(){
   playerActive = new Set();
-
   entities=[];
   alive=[];
   aliveCount=0;
@@ -451,13 +464,11 @@ function drawBallBase(cx,cy,col){
   const [r,g,b]=col;
   for(const [dx,dy] of mask) setPix(x0+dx,y0+dy,r,g,b);
 }
-
 function drawNameUnderBall(x,y,name){
   const label=String(name).toUpperCase().replace(/[^A-Z0-9_ .:-]/g,' ').trim().slice(0,16);
   const w=textWidth(label,1);
   drawTextShadow(label,(x-w/2)|0,(y+R+6)|0,1);
 }
-
 function drawEntity(e){
   const x=e.x|0, y=e.y|0;
   drawBallBase(x,y,e.baseCol);
@@ -474,14 +485,18 @@ function drawTopUI(){
   const aliveTxt = `ALIVE: ${aliveCount}/${entities.length}`;
   const lastTxt  = `LAST WIN: ${String(lastWinner).toUpperCase().slice(0,18)}`;
   const queueTxt = `QUEUE: ${joinQueue.length}`;
+  const chatTxt  = `CHAT: ${CHAT_PROVIDER || "OFF"}`;
 
   drawTextShadow(aliveTxt, x, y, s);
-  x += textWidth(aliveTxt, s) + 22;
+  x += textWidth(aliveTxt, s) + 18;
 
   drawTextShadow(lastTxt, x, y, s);
-  x += textWidth(lastTxt, s) + 22;
+  x += textWidth(lastTxt, s) + 18;
 
   drawTextShadow(queueTxt, x, y, s);
+  x += textWidth(queueTxt, s) + 18;
+
+  drawTextShadow(chatTxt, x, y, s);
 
   const elapsed = ((Date.now() - startMs)/1000)|0;
   const left = Math.max(0, RESTART_SECONDS - elapsed);
@@ -498,7 +513,7 @@ function renderPlay(holeCenterDeg){
   }
 }
 
-// win screen (old)
+// win screen
 function renderWin(){
   fillSolid(8,10,18);
   const title = "WE HAVE A WINNER";
@@ -594,10 +609,18 @@ function getWinnerIndex(){
 
 function tick(){
   if(state==="PLAY"){
-    while(aliveCountryCount() < 10 && joinQueue.length > 0){
-      const u = joinQueue.shift();
-      joinQueued.delete(u);
-      spawnPlayer(u);
+    // spawn from queue near endgame (safe)
+    const countryAlive = aliveCountryCount();
+    if(countryAlive < 10 && joinQueue.length > 0){
+      const targetAlive = 10; // keep match interesting
+      let toSpawn = Math.max(0, targetAlive - aliveCount);
+      toSpawn = Math.min(toSpawn, MAX_SPAWN_PER_TICK);
+
+      while(toSpawn > 0 && joinQueue.length > 0){
+        const u = joinQueue.shift();
+        joinQueued.delete(u);
+        if(spawnPlayer(u)) toSpawn--;
+      }
     }
 
     const holeCenterDeg = stepPhysics();
@@ -625,7 +648,6 @@ function tick(){
 // PPM output
 const headerBuf=Buffer.from(`P6\n${W} ${H}\n255\n`);
 const frameBuf=Buffer.alloc(headerBuf.length + rgb.length);
-
 function writeFrame(){
   headerBuf.copy(frameBuf,0);
   rgb.copy(frameBuf,headerBuf.length);
@@ -636,21 +658,27 @@ function writeFrame(){
 clearBG();
 drawTextShadow("BOOTING...", (W/2 - 70)|0, (H/2)|0, 3);
 writeFrame();
+setInterval(()=>{ tick(); writeFrame(); }, Math.round(1000/FPS));
 
-setInterval(()=>{
-  tick();
-  writeFrame();
-}, Math.round(1000/FPS));
+// -------- join helpers shared by both chats --------
+function tryQueueUser(user){
+  user = String(user||"").toLowerCase().trim();
+  if(!user) return;
+  if(joinQueued.has(user) || playerActive.has(user)) return;
+  if(joinQueue.length >= MAX_QUEUE) return;
+  joinQueued.add(user);
+  joinQueue.push(user);
+  console.error(`[join] queued ${user} (queue=${joinQueue.length})`);
+}
 
-// twitch chat
+// -------- Twitch IRC chat --------
 function startTwitchChat(){
   if(!TWITCH_OAUTH || !TWITCH_CHANNEL || !TWITCH_NICK){
-    console.error("[chat] disabled (missing TWITCH_OAUTH/TWITCH_CHANNEL/TWITCH_NICK)");
+    console.error("[twitch] chat disabled (missing TWITCH_OAUTH/TWITCH_CHANNEL/TWITCH_NICK)");
     return;
   }
-
   const sock=tls.connect(6697,'irc.chat.twitch.tv',{rejectUnauthorized:false},()=>{
-    console.error(`[chat] connecting nick="${TWITCH_NICK}" channel="#${TWITCH_CHANNEL}" oauth_len=${TWITCH_OAUTH.length}`);
+    console.error(`[twitch] connecting nick="${TWITCH_NICK}" channel="#${TWITCH_CHANNEL}"`);
     sock.write(`PASS ${TWITCH_OAUTH}\r\n`);
     sock.write(`NICK ${TWITCH_NICK}\r\n`);
     sock.write(`CAP REQ :twitch.tv/tags\r\n`);
@@ -663,10 +691,9 @@ function startTwitchChat(){
     let idx;
     while((idx=acc.indexOf('\r\n'))>=0){
       let line=acc.slice(0,idx); acc=acc.slice(idx+2);
-      if(printed<12){ console.error("[chat:raw]", line); printed++; }
+      if(printed<10){ console.error("[twitch:raw]", line); printed++; }
 
       if(line.startsWith('PING')){ sock.write('PONG :tmi.twitch.tv\r\n'); continue; }
-
       if(line[0]==='@'){
         const sp=line.indexOf(' ');
         if(sp>0) line=line.slice(sp+1);
@@ -676,49 +703,140 @@ function startTwitchChat(){
       if(m){
         const user=m[1].toLowerCase();
         const msg=m[2].trim();
-        console.error(`[chat:msg] ${user}: ${msg}`);
-
-        if(msg.toLowerCase()==="me"){
-          if(joinQueued.has(user)){
-            console.error(`[join] ${user} already queued (ignored)`);
-          }else{
-            joinQueued.add(user);
-            joinQueue.push(user);
-            console.error(`[join] queued ${user} (queue=${joinQueue.length})`);
-          }
-        }
+        if(msg.toLowerCase()==="me") tryQueueUser(user);
       }
     }
   });
 
-  sock.on('error', e=>console.error('[chat] error', e.message));
-  sock.on('end', ()=>console.error('[chat] ended'));
+  sock.on('error', e=>console.error('[twitch] error', e.message));
+  sock.on('end', ()=>console.error('[twitch] ended'));
 }
-startTwitchChat();
+
+// -------- YouTube Live Chat (polling) --------
+function httpsJson(url, headers){
+  return new Promise((resolve, reject)=>{
+    const req = https.request(url, {method:"GET", headers: headers||{}}, (res)=>{
+      let data="";
+      res.on("data", c=>data+=c);
+      res.on("end", ()=>{
+        if(res.statusCode && res.statusCode >= 200 && res.statusCode < 300){
+          try{ resolve(JSON.parse(data)); }catch(e){ reject(new Error("bad json")); }
+        }else{
+          reject(new Error(`http ${res.statusCode}: ${data.slice(0,200)}`));
+        }
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+async function resolveLiveChatId(){
+  if(YT_LIVE_CHAT_ID) return YT_LIVE_CHAT_ID;
+  if(!YT_VIDEO_ID) return "";
+  if(!YT_ACCESS_TOKEN) return "";
+
+  // videos.list?part=liveStreamingDetails returns activeLiveChatId (common)
+  const url = `https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id=${encodeURIComponent(YT_VIDEO_ID)}`;
+  const j = await httpsJson(url, {Authorization:`Bearer ${YT_ACCESS_TOKEN}`});
+  const item = (j.items && j.items[0]) || null;
+  const id = item && item.liveStreamingDetails && item.liveStreamingDetails.activeLiveChatId;
+  return id || "";
+}
+
+async function startYouTubeChat(){
+  if(!YT_ACCESS_TOKEN){
+    console.error("[youtube] chat disabled (missing YT_ACCESS_TOKEN)");
+    return;
+  }
+  const liveChatId = await resolveLiveChatId();
+  if(!liveChatId){
+    console.error("[youtube] chat disabled (missing YT_LIVE_CHAT_ID or resolvable YT_VIDEO_ID)");
+    return;
+  }
+
+  console.error(`[youtube] chat enabled liveChatId=${String(liveChatId).slice(0,8)}...`);
+
+  let pageToken = "";
+  while(true){
+    try{
+      const url =
+        `https://www.googleapis.com/youtube/v3/liveChatMessages?part=snippet,authorDetails` +
+        `&liveChatId=${encodeURIComponent(liveChatId)}` +
+        (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
+
+      const j = await httpsJson(url, {Authorization:`Bearer ${YT_ACCESS_TOKEN}`});
+
+      const items = j.items || [];
+      for(const it of items){
+        const user = (it.authorDetails && it.authorDetails.displayName) ? it.authorDetails.displayName : "yt";
+        const msg  = (it.snippet && it.snippet.displayMessage) ? it.snippet.displayMessage : "";
+        if(String(msg).trim().toLowerCase() === "me"){
+          tryQueueUser(user);
+        }
+      }
+
+      pageToken = j.nextPageToken || pageToken;
+      const waitMs = Math.max(1000, (j.pollingIntervalMillis|0) || 2000);
+      await new Promise(r=>setTimeout(r, waitMs));
+    }catch(e){
+      console.error("[youtube] chat error:", e.message);
+      await new Promise(r=>setTimeout(r, 5000));
+    }
+  }
+}
+
+// start selected chat provider
+if(CHAT_PROVIDER === "twitch") startTwitchChat();
+else if(CHAT_PROVIDER === "youtube") startYouTubeChat();
+else console.error("[chat] disabled (CHAT_PROVIDER not set)");
 JS
 
 # hard stop if JS is broken
-node -c /tmp/sim.js
+node -c /tmp/sim_dual.js
 echo "[sim] syntax OK"
 
-set +e
-while true; do
-  echo "[stream] starting node -> ffmpeg ..."
-  node /tmp/sim.js | ffmpeg -hide_banner -loglevel info -stats \
-    -thread_queue_size 1024 \
-    -probesize 50M -analyzeduration 2M \
-    -f image2pipe -vcodec ppm -r "$FPS" -i - \
-    -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
-    -map 0:v -map 1:a \
-    -c:v libx264 -preset ultrafast -tune zerolatency \
-    -pix_fmt yuv420p \
-    -g $((FPS*2)) \
-    -x264-params "keyint=$((FPS*2)):min-keyint=$((FPS*2)):scenecut=0" \
-    -b:v 1800k -maxrate 1800k -bufsize 3600k \
-    -c:a aac -b:a 128k -ar 44100 \
-    -f flv "$URL"
+# ---------- runner to stream ONE instance ----------
+run_one () {
+  local name="$1"
+  local url="$2"
+  shift 2
 
-  code=$?
-  echo "[stream] ffmpeg exited (code=$code). reconnecting in 3s..."
-  sleep 3
-done
+  echo "[$name] starting node -> ffmpeg ..."
+  set +e
+  while true; do
+    node /tmp/sim_dual.js | ffmpeg -hide_banner -loglevel info -stats \
+      -thread_queue_size 1024 \
+      -probesize 50M -analyzeduration 2M \
+      -f image2pipe -vcodec ppm -r "$FPS" -i - \
+      -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
+      -map 0:v -map 1:a \
+      -c:v libx264 -preset ultrafast -tune zerolatency \
+      -pix_fmt yuv420p \
+      -g $((FPS*2)) \
+      -x264-params "keyint=$((FPS*2)):min-keyint=$((FPS*2)):scenecut=0" \
+      -b:v 1800k -maxrate 1800k -bufsize 3600k \
+      -c:a aac -b:a 128k -ar 44100 \
+      -f flv "$url"
+    code=$?
+    echo "[$name] ffmpeg exited (code=$code). reconnecting in 3s..."
+    sleep 3
+  done
+}
+
+# ---------- start BOTH instances ----------
+# Twitch game instance
+(
+  export CHAT_PROVIDER="twitch"
+  export TWITCH_OAUTH TWITCH_CHANNEL TWITCH_NICK
+  run_one "twitch" "$TWITCH_URL"
+) &
+
+# YouTube game instance
+(
+  export CHAT_PROVIDER="youtube"
+  export YT_ACCESS_TOKEN YT_LIVE_CHAT_ID YT_VIDEO_ID
+  run_one "youtube" "$YOUTUBE_URL"
+) &
+
+wait
