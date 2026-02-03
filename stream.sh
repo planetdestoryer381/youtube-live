@@ -2,47 +2,52 @@
 set -euo pipefail
 
 # =========================
-# 🔑 YOUR STREAM KEY
+# 🔑 STREAM KEY (set yours)
 # =========================
 export YT_STREAM_KEY="u0d7-eetf-a97p-uer8-18ju"
 
 # =========================
-# 🎬 VERTICAL SHORTS SETTINGS
+# 🎬 VERTICAL SETTINGS
 # =========================
-export FPS=20
-export W=1080
-export H=1920
+export FPS="${FPS:-20}"
+export W="${W:-1080}"
+export H="${H:-1920}"
 
-# Game / physics defaults (tweak later if you want)
-export BALL_R=30
-export RING_R=300
-export HOLE_DEG=70
-export SPIN=0.9
-export SPEED=100
-export PHYS_MULT=3
-export WIN_SCREEN_SECONDS=6
-export RESTART_SECONDS=21000
+# =========================
+# GAME SIZING (your requests)
+# circle 1.5x bigger, balls 3x bigger
+# =========================
+export BALL_R="${BALL_R:-30}"     # 3x bigger (10 -> 30)
+export RING_R="${RING_R:-300}"    # 1.5x bigger (200 -> 300)
 
-export RING_THICKNESS=4
-export RING_HOLE_EDGE=1
+export HOLE_DEG="${HOLE_DEG:-70}"
+export SPIN="${SPIN:-0.9}"
+export SPEED="${SPEED:-100}"
+export PHYS_MULT="${PHYS_MULT:-3}"
+export WIN_SCREEN_SECONDS="${WIN_SCREEN_SECONDS:-6}"
+export RESTART_SECONDS="${RESTART_SECONDS:-21000}"
 
-# Flags
-export COUNTRIES_PATH="./countries.json"
-export FLAG_SIZE=60
-export FLAGS_DIR="/tmp/flags"
+export RING_THICKNESS="${RING_THICKNESS:-4}"
+export RING_HOLE_EDGE="${RING_HOLE_EDGE:-1}"
+
+# Flags (bigger so visible inside bigger balls)
+export COUNTRIES_PATH="${COUNTRIES_PATH:-./countries.json}"
+export FLAG_SIZE="${FLAG_SIZE:-60}"
+export FLAGS_DIR="${FLAGS_DIR:-/tmp/flags}"
 mkdir -p "$FLAGS_DIR"
 
 YOUTUBE_URL="rtmps://a.rtmps.youtube.com/live2/${YT_STREAM_KEY}"
 
 echo "=== YOUTUBE SHORTS STREAM ==="
 echo "Resolution: ${W}x${H}  FPS=${FPS}"
-echo "URL: $YOUTUBE_URL"
+echo "BALL_R=${BALL_R}  RING_R=${RING_R}  FLAG_SIZE=${FLAG_SIZE}"
+echo "URL: rtmps://a.rtmps.youtube.com/live2/ (key hidden)"
 node -v
 ffmpeg -version | head -n 2
 echo "============================"
 
 # --------------------------------------------------
-# Download flags (same as your original, kept)
+# Download flags -> convert to .rgb
 # --------------------------------------------------
 download_flag () {
   local iso="$1"
@@ -74,25 +79,22 @@ done
 echo "[flags] prepared (iso2 unique): $COUNT"
 
 # --------------------------------------------------
-# WRITE THE GAME ENGINE (CLEAN YOUTUBE ONLY)
+# WRITE GAME ENGINE (RAW RGB OUTPUT: NO PPM HEADERS)
 # --------------------------------------------------
 cat > /tmp/yt_sim.js <<'JS'
 'use strict';
 const fs = require('fs');
 
 process.stdout.on("error", (e) => {
-  if (e && e.code === "EPIPE") {
-    console.error("[pipe] ffmpeg closed stdin — exiting");
-    process.exit(0);
-  }
+  if (e && e.code === "EPIPE") process.exit(0);
 });
 
 const FPS = +process.env.FPS || 20;
 const W   = +process.env.W   || 1080;
 const H   = +process.env.H   || 1920;
 
-const R         = +process.env.BALL_R || 10;
-const RING_R    = +process.env.RING_R || 200;
+const R         = +process.env.BALL_R || 30;
+const RING_R    = +process.env.RING_R || 300;
 const HOLE_DEG  = +process.env.HOLE_DEG || 70;
 const SPIN      = +process.env.SPIN || 0.9;
 const SPEED     = +process.env.SPEED || 100;
@@ -106,13 +108,14 @@ const RING_HOLE_EDGE = (+process.env.RING_HOLE_EDGE || 0) ? 1 : 0;
 
 const COUNTRIES_PATH = process.env.COUNTRIES_PATH || "./countries.json";
 const FLAGS_DIR = process.env.FLAGS_DIR || "/tmp/flags";
-const FLAG_SIZE = +process.env.FLAG_SIZE || 26;
+const FLAG_SIZE = +process.env.FLAG_SIZE || 60;
 
-const CX = W * 0.5, CY = H * 0.5;
+const CX = W*0.5, CY = H*0.5;
 const dt = PHYS_MULT / FPS;
 
-// framebuffer
-const rgb = Buffer.alloc(W * H * 3);
+// framebuffer (RAW rgb24)
+const rgb = Buffer.alloc(W*H*3);
+
 function setPix(x,y,r,g,b){
   if(x<0||y<0||x>=W||y>=H) return;
   const i=(y*W+x)*3;
@@ -123,7 +126,7 @@ function fillSolid(r,g,b){
 }
 function clearBG(){ fillSolid(10,14,28); }
 
-// tiny font (enough for UI)
+// tiny font for UI
 const FONT={
 'A':[0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
 'E':[0b11111,0b10000,0b11110,0b10000,0b10000,0b10000,0b11111],
@@ -152,6 +155,7 @@ const FONT={
 '_':[0,0,0,0,0,0,0b11111],
 '.':[0,0,0,0,0,0,0b00100],
 };
+
 function drawChar(ch,x,y,scale,color){
   const rows = FONT[ch] || FONT['A'];
   const [r,g,b]=color;
@@ -258,7 +262,7 @@ let state="PLAY";
 let t=0, winFrames=0;
 let winner=null, lastWinner="none";
 
-// ball mask
+// ball mask (uses big R)
 const mask=[];
 for(let y=-R;y<=R;y++) for(let x=-R;x<=R;x++) if(x*x+y*y<=R*R) mask.push([x,y]);
 
@@ -269,7 +273,7 @@ function drawBallBase(cx,cy){
 function drawNameUnderBall(x,y,name){
   const label=String(name).toUpperCase().replace(/[^A-Z0-9_ .:-]/g,' ').trim().slice(0,16);
   const w=textWidth(label,1);
-  drawTextShadow(label,(x-w/2)|0,(y+R+6)|0,1);
+  drawTextShadow(label,(x-w/2)|0,(y+R+8)|0,1);
 }
 function drawEntity(e){
   const x=e.x|0, y=e.y|0;
@@ -288,9 +292,7 @@ function drawRing(holeCenterDeg){
     const a = deg*Math.PI/180;
     const ca=Math.cos(a), sa=Math.sin(a);
     for(let rr=inner; rr<=outer; rr+=1){
-      const x = (CX + ca*rr)|0;
-      const y = (CY + sa*rr)|0;
-      setPix(x,y,230,230,235);
+      setPix((CX + ca*rr)|0, (CY + sa*rr)|0, 230,230,235);
     }
   }
 
@@ -301,27 +303,21 @@ function drawRing(holeCenterDeg){
       const a=edge*Math.PI/180;
       const ca=Math.cos(a), sa=Math.sin(a);
       for(let rr=inner-6; rr<=outer+6; rr+=1){
-        const x = (CX + ca*rr)|0;
-        const y = (CY + sa*rr)|0;
-        setPix(x,y,255,180,80);
+        setPix((CX + ca*rr)|0, (CY + sa*rr)|0, 255,180,80);
       }
     }
   }
 }
 
-//
-// ✅ THIS IS THE ONLY CHANGE: UI moved left of the ring
-//
+// ✅ UI ABOVE circle (phone readable)
 function drawUI(){
   const s = 2;
-
-  // Put UI ABOVE the circle (safe on phones)
   const lineH = 7*s + 10;
 
-  // left aligned starting near the ring's left edge
+  // align near ring left edge
   const textX = Math.max(14, (CX - RING_R) | 0);
 
-  // above the ring (4 lines tall + padding)
+  // above the ring (4 lines + padding)
   const baseY = Math.max(14, (CY - RING_R - (lineH*4 + 18)) | 0);
 
   drawTextShadow(`ALIVE: ${aliveCount}/${entities.length}`, textX, baseY, s);
@@ -340,19 +336,22 @@ function renderPlay(holeCenterDeg){
   drawRing(holeCenterDeg);
   for(let i=0;i<entities.length;i++) if(alive[i]) drawEntity(entities[i]);
 }
+
 function renderWin(){
   fillSolid(8,10,18);
   const title="WE HAVE A WINNER";
-  drawTextShadow(title,(W/2-textWidth(title,4)/2)|0,(H/2-100)|0,4);
+  drawTextShadow(title,(W/2-textWidth(title,4)/2)|0,(H/2-140)|0,4);
+
   if(winner){
     const x=(W/2)|0, y=(H/2-10)|0;
+    // uses big BALL_R automatically (3x bigger)
     drawBallBase(x,y);
     if(winner.iso2){
       const buf=flagRGB(winner.iso2);
       if(buf) blitSpriteInCircle(x,y,R,buf,FLAG_SIZE);
     }
     const name=String(winner.name).toUpperCase().slice(0,20);
-    drawTextShadow(name,(W/2-textWidth(name,2)/2)|0,(H/2+40)|0,2);
+    drawTextShadow(name,(W/2-textWidth(name,2)/2)|0,(H/2+R+18)|0,2);
   }
 }
 
@@ -403,6 +402,7 @@ function stepPhysics(){
     b.y += b.vy*dt;
   }
 
+  // collisions
   const minD = 2*R, minD2=minD*minD;
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
@@ -428,6 +428,7 @@ function stepPhysics(){
     }
   }
 
+  // ring wall + hole
   const wallR = RING_R - R - 3;
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
@@ -479,13 +480,9 @@ function tick(){
   }
 }
 
-// PPM output
-const headerBuf=Buffer.from(`P6\n${W} ${H}\n255\n`);
-const frameBuf=Buffer.alloc(headerBuf.length + rgb.length);
+// output raw frame
 function writeFrame(){
-  headerBuf.copy(frameBuf,0);
-  rgb.copy(frameBuf,headerBuf.length);
-  process.stdout.write(frameBuf);
+  process.stdout.write(rgb);
 }
 
 // boot frame
@@ -500,17 +497,18 @@ node -c /tmp/yt_sim.js
 echo "[sim] syntax OK"
 
 # --------------------------------------------------
-# RUN STREAM (YOUTUBE ONLY)
+# STREAM LOOP (RAW RGB -> H264 -> RTMPS)
 # --------------------------------------------------
 while true; do
   node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel info -stats \
     -thread_queue_size 1024 \
-    -f image2pipe -vcodec ppm -r "$FPS" -i - \
+    -f rawvideo -pix_fmt rgb24 -s "${W}x${H}" -r "$FPS" -i - \
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
     -map 0:v -map 1:a \
     -c:v libx264 -preset ultrafast -tune zerolatency \
     -pix_fmt yuv420p \
     -g $((FPS*2)) \
+    -x264-params "keyint=$((FPS*2)):min-keyint=$((FPS*2)):scenecut=0" \
     -b:v 1800k -maxrate 1800k -bufsize 3600k \
     -c:a aac -b:a 128k -ar 44100 \
     -f flv "$YOUTUBE_URL"
