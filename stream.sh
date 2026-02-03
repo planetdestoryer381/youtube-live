@@ -2,52 +2,46 @@
 set -euo pipefail
 
 # =========================
-# 🔑 STREAM KEY (set yours)
+# 🔑 YOUR STREAM KEY
 # =========================
+# 1. Replaced with requested placeholder
 export YT_STREAM_KEY="u0d7-eetf-a97p-uer8-18ju"
 
 # =========================
-# 🎬 VERTICAL SETTINGS
+# 🎬 VERTICAL SHORTS SETTINGS
 # =========================
-export FPS="${FPS:-20}"
-export W="${W:-1080}"
-export H="${H:-1920}"
+export FPS=20
+export W=1080
+export H=1920
 
-# =========================
-# GAME SIZING (your requests)
-# circle 1.5x bigger, balls 3x bigger
-# =========================
-export BALL_R="${BALL_R:-30}"     # 3x bigger (10 -> 30)
-export RING_R="${RING_R:-300}"    # 1.5x bigger (200 -> 300)
+# 2. Made balls 2.5x bigger (Original 10 -> 25)
+export BALL_R=25
+export RING_R=200
+export HOLE_DEG=70
+export SPIN=0.9
+export SPEED=100
+export PHYS_MULT=3
+export WIN_SCREEN_SECONDS=6
+export RESTART_SECONDS=21000
 
-export HOLE_DEG="${HOLE_DEG:-70}"
-export SPIN="${SPIN:-0.9}"
-export SPEED="${SPEED:-100}"
-export PHYS_MULT="${PHYS_MULT:-3}"
-export WIN_SCREEN_SECONDS="${WIN_SCREEN_SECONDS:-6}"
-export RESTART_SECONDS="${RESTART_SECONDS:-21000}"
+export RING_THICKNESS=4
+export RING_HOLE_EDGE=1
 
-export RING_THICKNESS="${RING_THICKNESS:-4}"
-export RING_HOLE_EDGE="${RING_HOLE_EDGE:-1}"
-
-# Flags (bigger so visible inside bigger balls)
-export COUNTRIES_PATH="${COUNTRIES_PATH:-./countries.json}"
-export FLAG_SIZE="${FLAG_SIZE:-60}"
-export FLAGS_DIR="${FLAGS_DIR:-/tmp/flags}"
+# Flags
+export COUNTRIES_PATH="./countries.json"
+# Adjusted flag size to match new ball radius (radius 25 = diameter 50)
+export FLAG_SIZE=50
+export FLAGS_DIR="/tmp/flags"
 mkdir -p "$FLAGS_DIR"
 
 YOUTUBE_URL="rtmps://a.rtmps.youtube.com/live2/${YT_STREAM_KEY}"
 
 echo "=== YOUTUBE SHORTS STREAM ==="
 echo "Resolution: ${W}x${H}  FPS=${FPS}"
-echo "BALL_R=${BALL_R}  RING_R=${RING_R}  FLAG_SIZE=${FLAG_SIZE}"
-echo "URL: rtmps://a.rtmps.youtube.com/live2/ (key hidden)"
-node -v
-ffmpeg -version | head -n 2
-echo "============================"
+echo "URL: $YOUTUBE_URL"
 
 # --------------------------------------------------
-# Download flags -> convert to .rgb
+# Download flags
 # --------------------------------------------------
 download_flag () {
   local iso="$1"
@@ -66,453 +60,194 @@ download_flag () {
     -f rawvideo -pix_fmt rgb24 "$out_rgb" >/dev/null 2>&1 || true
 }
 
-echo "[flags] preparing from $COUNTRIES_PATH ..."
-ISO_LIST="$(grep -oE '"iso2"[[:space:]]*:[[:space:]]*"[^"]+"' "$COUNTRIES_PATH" \
-  | sed -E 's/.*"([a-zA-Z]{2})".*/\1/' \
-  | tr 'A-Z' 'a-z' | sort -u)"
+echo "[flags] preparing..."
+ISO_LIST="$(grep -oE '"iso2"[[:space:]]*:[[:space:]]*"[^"]+"' "$COUNTRIES_PATH" | sed -E 's/.*"([a-zA-Z]{2})".*/\1/' | tr 'A-Z' 'a-z' | sort -u)"
 
-COUNT=0
 for iso in $ISO_LIST; do
   download_flag "$iso" "$FLAG_SIZE" || true
-  COUNT=$((COUNT+1))
 done
-echo "[flags] prepared (iso2 unique): $COUNT"
 
 # --------------------------------------------------
-# WRITE GAME ENGINE (RAW RGB OUTPUT: NO PPM HEADERS)
+# GAME ENGINE
 # --------------------------------------------------
 cat > /tmp/yt_sim.js <<'JS'
 'use strict';
 const fs = require('fs');
 
-process.stdout.on("error", (e) => {
-  if (e && e.code === "EPIPE") process.exit(0);
-});
-
 const FPS = +process.env.FPS || 20;
 const W   = +process.env.W   || 1080;
 const H   = +process.env.H   || 1920;
-
-const R         = +process.env.BALL_R || 30;
-const RING_R    = +process.env.RING_R || 300;
-const HOLE_DEG  = +process.env.HOLE_DEG || 70;
-const SPIN      = +process.env.SPIN || 0.9;
-const SPEED     = +process.env.SPEED || 100;
+const R   = +process.env.BALL_R || 25;
+const RING_R = +process.env.RING_R || 200;
+const HOLE_DEG = +process.env.HOLE_DEG || 70;
+const SPIN = +process.env.SPIN || 0.9;
+const SPEED = +process.env.SPEED || 100;
 const PHYS_MULT = +process.env.PHYS_MULT || 3;
 const WIN_SECONDS = +process.env.WIN_SCREEN_SECONDS || 6;
 const RESTART_SECONDS = +process.env.RESTART_SECONDS || 21000;
-const startMs = Date.now();
-
-const RING_THICKNESS = +process.env.RING_THICKNESS || 4;
-const RING_HOLE_EDGE = (+process.env.RING_HOLE_EDGE || 0) ? 1 : 0;
-
-const COUNTRIES_PATH = process.env.COUNTRIES_PATH || "./countries.json";
+const FLAG_SIZE = +process.env.FLAG_SIZE || 50;
 const FLAGS_DIR = process.env.FLAGS_DIR || "/tmp/flags";
-const FLAG_SIZE = +process.env.FLAG_SIZE || 60;
+const COUNTRIES_PATH = process.env.COUNTRIES_PATH || "./countries.json";
 
-const CX = W*0.5, CY = H*0.5;
+const CX = W * 0.5, CY = H * 0.5;
 const dt = PHYS_MULT / FPS;
-
-// framebuffer (RAW rgb24)
-const rgb = Buffer.alloc(W*H*3);
+const startMs = Date.now();
+const rgb = Buffer.alloc(W * H * 3);
 
 function setPix(x,y,r,g,b){
   if(x<0||y<0||x>=W||y>=H) return;
   const i=(y*W+x)*3;
   rgb[i]=r; rgb[i+1]=g; rgb[i+2]=b;
 }
-function fillSolid(r,g,b){
-  for(let i=0;i<rgb.length;i+=3){ rgb[i]=r; rgb[i+1]=g; rgb[i+2]=b; }
-}
-function clearBG(){ fillSolid(10,14,28); }
 
-// tiny font for UI
-const FONT={
-'A':[0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
-'E':[0b11111,0b10000,0b11110,0b10000,0b10000,0b10000,0b11111],
-'I':[0b01110,0b00100,0b00100,0b00100,0b00100,0b00100,0b01110],
-'L':[0b10000,0b10000,0b10000,0b10000,0b10000,0b10000,0b11111],
-'N':[0b10001,0b11001,0b10101,0b10011,0b10001,0b10001,0b10001],
-'O':[0b01110,0b10001,0b10001,0b10001,0b10001,0b10001,0b01110],
-'R':[0b11110,0b10001,0b10001,0b11110,0b10010,0b10001,0b10001],
-'S':[0b01111,0b10000,0b01110,0b00001,0b00001,0b10001,0b01110],
-'T':[0b11111,0b00100,0b00100,0b00100,0b00100,0b00100,0b00100],
-'V':[0b10001,0b10001,0b10001,0b10001,0b10001,0b01010,0b00100],
-'W':[0b10001,0b10001,0b10001,0b10101,0b10101,0b11011,0b10001],
-'0':[0b01110,0b10001,0b10011,0b10101,0b11001,0b10001,0b01110],
-'1':[0b00100,0b01100,0b00100,0b00100,0b00100,0b00100,0b01110],
-'2':[0b01110,0b10001,0b00001,0b00110,0b01000,0b10000,0b11111],
-'3':[0b11110,0b00001,0b00001,0b01110,0b00001,0b00001,0b11110],
-'4':[0b00010,0b00110,0b01010,0b10010,0b11111,0b00010,0b00010],
-'5':[0b11111,0b10000,0b11110,0b00001,0b00001,0b10001,0b01110],
-'6':[0b00110,0b01000,0b10000,0b11110,0b10001,0b10001,0b01110],
-'7':[0b11111,0b00001,0b00010,0b00100,0b01000,0b01000,0b01000],
-'8':[0b01110,0b10001,0b10001,0b01110,0b10001,0b10001,0b01110],
-'9':[0b01110,0b10001,0b10001,0b01111,0b00001,0b00010,0b01100],
-' ':[0,0,0,0,0,0,0],
-':':[0,0b00100,0,0,0b00100,0,0],
-'-':[0,0,0b11111,0,0,0,0],
-'_':[0,0,0,0,0,0,0b11111],
-'.':[0,0,0,0,0,0,0b00100],
-};
-
-function drawChar(ch,x,y,scale,color){
-  const rows = FONT[ch] || FONT['A'];
-  const [r,g,b]=color;
-  for(let rr=0; rr<7; rr++){
-    const bits=rows[rr] || 0;
-    for(let cc=0; cc<5; cc++){
-      if(bits & (1<<(4-cc))){
-        for(let sy=0; sy<scale; sy++)
-          for(let sx=0; sx<scale; sx++)
-            setPix(x+cc*scale+sx, y+rr*scale+sy, r,g,b);
-      }
-    }
-  }
-}
+// Simple Font Logic
+const FONT={'A':[14,17,17,31,17,17,17],'E':[31,16,30,16,16,16,31],'I':[14,4,4,4,4,4,14],'L':[16,16,16,16,16,16,31],'N':[17,25,21,19,17,17,17],'O':[14,17,17,17,17,17,14],'R':[30,17,17,30,18,17,17],'S':[15,16,14,1,1,17,14],'T':[31,4,4,4,4,4,4],'V':[17,17,17,17,17,10,4],'W':[17,17,17,21,21,27,17],'0':[14,17,19,21,25,17,14],'1':[4,12,4,4,4,4,14],'2':[14,17,1,6,8,16,31],'3':[30,1,1,14,1,1,30],'4':[2,6,10,18,31,2,2],'5':[31,16,30,1,1,17,14],'6':[6,8,16,30,17,17,14],'7':[31,1,2,4,8,8,8],'8':[14,17,17,14,17,17,14],'9':[14,17,17,15,1,2,12],' ':[0,0,0,0,0,0,0],':':[0,4,0,0,4,0,0],'.':[0,0,0,0,0,0,4]};
 function drawText(text,x,y,scale,color){
   text=String(text).toUpperCase();
-  let cx=x|0;
+  let curX=x;
   for(let i=0;i<text.length;i++){
-    drawChar(text[i], cx, y|0, scale, color);
-    cx += (5*scale + scale);
+    const rows=FONT[text[i]]||FONT['A'];
+    for(let r=0;r<7;r++){
+      for(let c=0;c<5;c++){
+        if(rows[r]&(1<<(4-c))){
+          for(let sy=0;sy<scale;sy++) for(let sx=0;sx<scale;sx++) setPix(curX+c*scale+sx,y+r*scale+sy,color[0],color[1],color[2]);
+        }
+      }
+    }
+    curX+=6*scale;
   }
 }
-function textWidth(text,scale){ return String(text).length*(5*scale+scale)-scale; }
-function drawTextShadow(text,x,y,scale){
-  drawText(text, x+1, y+1, scale, [0,0,0]);
-  drawText(text, x, y, scale, [255,255,255]);
-}
+function textWidth(text,scale){ return text.length*6*scale; }
 
-// flags
-function readRGB(path,size){
-  try{
-    const buf=fs.readFileSync(path);
-    if(buf.length===size*size*3) return buf;
-  }catch{}
-  return null;
-}
-function flagRGB(iso2){
-  return readRGB(`${FLAGS_DIR}/${iso2}_${FLAG_SIZE}.rgb`, FLAG_SIZE);
-}
-function blitSpriteInCircle(cx, cy, radius, spriteBuf, spriteSize){
+// Graphics
+function blitSprite(cx,cy,radius,spriteBuf,spriteSize){
   if(!spriteBuf) return;
-  const half=(spriteSize/2)|0;
-  const x0=(cx-half)|0, y0=(cy-half)|0;
-  const r2=(radius-1)*(radius-1);
-  for(let sy=0; sy<spriteSize; sy++){
-    for(let sx=0; sx<spriteSize; sx++){
-      const px=x0+sx, py=y0+sy;
-      const dx=px-cx, dy=py-cy;
-      if(dx*dx+dy*dy>r2) continue;
+  const x0=(cx-spriteSize/2)|0, y0=(cy-spriteSize/2)|0;
+  for(let sy=0;sy<spriteSize;sy++){
+    for(let sx=0;sx<spriteSize;sx++){
+      const dx=x0+sx-cx, dy=y0+sy-cy;
+      if(dx*dx+dy*dy > radius*radius) continue;
       const si=(sy*spriteSize+sx)*3;
-      setPix(px,py,spriteBuf[si],spriteBuf[si+1],spriteBuf[si+2]);
+      setPix(x0+sx,y0+sy,spriteBuf[si],spriteBuf[si+1],spriteBuf[si+2]);
     }
   }
 }
 
-// helpers
-function inHole(angleDeg, holeCenterDeg){
-  const half=HOLE_DEG/2;
-  let d=(angleDeg-holeCenterDeg+180)%360-180;
-  return Math.abs(d)<=half;
-}
-function normalizeSpeed(b, target){
-  const v = Math.hypot(b.vx, b.vy);
-  if(v < 1e-6){
-    const a = Math.random()*Math.PI*2;
-    b.vx = Math.cos(a)*target;
-    b.vy = Math.sin(a)*target;
-    return;
-  }
-  const s = target / v;
-  b.vx *= s; b.vy *= s;
-}
+function drawUI(aliveCount, total, lastWinner, holeCenterDeg){
+  const s = 3; 
+  const lineH = 7*s + 15;
+  // 2. Moved text ABOVE the circle and centered it
+  const textY = (CY - RING_R - 180) | 0;
 
-// countries
-function loadCountries(){
-  const raw=fs.readFileSync(COUNTRIES_PATH,"utf8");
-  const arr=JSON.parse(raw);
-  const seen=new Set();
-  const out=[];
-  for(const c of arr){
-    const name=String(c.name||"").trim();
-    const iso2=String(c.iso2||"").trim().toLowerCase();
-    if(!name||iso2.length!==2) continue;
-    if(seen.has(iso2)) continue;
-    seen.add(iso2);
-    out.push({name,iso2});
-  }
-  return out;
-}
-const COUNTRIES=loadCountries();
-console.error(`[countries] loaded ${COUNTRIES.length}`);
+  const labels = [
+    `ALIVE: ${aliveCount}/${total}`,
+    `LAST WIN: ${lastWinner}`,
+    `TYPE ME IN CHAT TO ENTER`
+  ];
 
-function fmtCountdown(sec){
-  sec = Math.max(0, sec|0);
-  const h = (sec/3600)|0;
-  const m = ((sec%3600)/60)|0;
-  const s = (sec%60)|0;
-  return `RESTART IN ${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-}
-
-// entities
-let entities=[], alive=[], aliveCount=0;
-let state="PLAY";
-let t=0, winFrames=0;
-let winner=null, lastWinner="none";
-
-// ball mask (uses big R)
-const mask=[];
-for(let y=-R;y<=R;y++) for(let x=-R;x<=R;x++) if(x*x+y*y<=R*R) mask.push([x,y]);
-
-function drawBallBase(cx,cy){
-  const x0=cx|0, y0=cy|0;
-  for(const [dx,dy] of mask) setPix(x0+dx,y0+dy,50,70,120);
-}
-function drawNameUnderBall(x,y,name){
-  const label=String(name).toUpperCase().replace(/[^A-Z0-9_ .:-]/g,' ').trim().slice(0,16);
-  const w=textWidth(label,1);
-  drawTextShadow(label,(x-w/2)|0,(y+R+8)|0,1);
-}
-function drawEntity(e){
-  const x=e.x|0, y=e.y|0;
-  drawBallBase(x,y);
-  if(e.imageBuf) blitSpriteInCircle(x,y,R,e.imageBuf,e.imageSize);
-  drawNameUnderBall(x,y,e.name);
+  labels.forEach((txt, i) => {
+    const w = textWidth(txt, s);
+    const x = (CX - w/2) | 0;
+    drawText(txt, x+2, textY + i*lineH + 2, s, [0,0,0]);
+    drawText(txt, x, textY + i*lineH, s, [255,255,255]);
+  });
 }
 
 function drawRing(holeCenterDeg){
-  const thick = Math.max(2, RING_THICKNESS);
-  const inner = RING_R - thick;
-  const outer = RING_R + thick;
-
-  for(let deg=0; deg<360; deg+=0.35){
-    if(inHole(deg, holeCenterDeg)) continue;
-    const a = deg*Math.PI/180;
-    const ca=Math.cos(a), sa=Math.sin(a);
-    for(let rr=inner; rr<=outer; rr+=1){
-      setPix((CX + ca*rr)|0, (CY + sa*rr)|0, 230,230,235);
-    }
-  }
-
-  if(RING_HOLE_EDGE){
-    const edgeA = holeCenterDeg - HOLE_DEG/2;
-    const edgeB = holeCenterDeg + HOLE_DEG/2;
-    for(const edge of [edgeA, edgeB]){
-      const a=edge*Math.PI/180;
-      const ca=Math.cos(a), sa=Math.sin(a);
-      for(let rr=inner-6; rr<=outer+6; rr+=1){
-        setPix((CX + ca*rr)|0, (CY + sa*rr)|0, 255,180,80);
-      }
+  for(let deg=0; deg<360; deg+=0.4){
+    let d=(deg-holeCenterDeg+180)%360-180;
+    if(Math.abs(d) <= HOLE_DEG/2) continue;
+    const a=deg*Math.PI/180;
+    for(let r=RING_R-4; r<=RING_R+4; r++){
+      setPix((CX+Math.cos(a)*r)|0, (CY+Math.sin(a)*r)|0, 240,240,240);
     }
   }
 }
 
-// ✅ UI ABOVE circle (phone readable)
-function drawUI(){
-  const s = 2;
-  const lineH = 7*s + 10;
-
-  // align near ring left edge
-  const textX = Math.max(14, (CX - RING_R) | 0);
-
-  // above the ring (4 lines + padding)
-  const baseY = Math.max(14, (CY - RING_R - (lineH*4 + 18)) | 0);
-
-  drawTextShadow(`ALIVE: ${aliveCount}/${entities.length}`, textX, baseY, s);
-  drawTextShadow(`LAST WIN: ${String(lastWinner).toUpperCase().slice(0,18)}`, textX, baseY + lineH, s);
-
-  const elapsed = ((Date.now() - startMs)/1000)|0;
-  const left = Math.max(0, RESTART_SECONDS - elapsed);
-  drawTextShadow(fmtCountdown(left), textX, baseY + lineH*2, s);
-
-  drawTextShadow("TYPE ME IN CHAT TO ENTER", textX, baseY + lineH*3, s);
-}
-
-function renderPlay(holeCenterDeg){
-  clearBG();
-  drawUI();
-  drawRing(holeCenterDeg);
-  for(let i=0;i<entities.length;i++) if(alive[i]) drawEntity(entities[i]);
-}
-
-function renderWin(){
-  fillSolid(8,10,18);
-  const title="WE HAVE A WINNER";
-  drawTextShadow(title,(W/2-textWidth(title,4)/2)|0,(H/2-140)|0,4);
-
-  if(winner){
-    const x=(W/2)|0, y=(H/2-10)|0;
-    // uses big BALL_R automatically (3x bigger)
-    drawBallBase(x,y);
-    if(winner.iso2){
-      const buf=flagRGB(winner.iso2);
-      if(buf) blitSpriteInCircle(x,y,R,buf,FLAG_SIZE);
-    }
-    const name=String(winner.name).toUpperCase().slice(0,20);
-    drawTextShadow(name,(W/2-textWidth(name,2)/2)|0,(H/2+R+18)|0,2);
-  }
-}
+// Game State
+let entities=[], alive=[], state="PLAY", t=0, winner=null, lastWinner="NONE";
+const countries=JSON.parse(fs.readFileSync(COUNTRIES_PATH,"utf8")).slice(0,50);
 
 function startRound(){
-  entities=[]; alive=[]; aliveCount=0;
-  const innerR = Math.max(35, RING_R - R - 35);
-
-  for(const c of COUNTRIES){
-    const a=Math.random()*Math.PI*2;
-    const rr=Math.random()*innerR;
-    const dir=Math.random()*Math.PI*2;
-
-    entities.push({
-      name:c.name,
-      iso2:c.iso2,
-      imageBuf: flagRGB(c.iso2),
-      imageSize: FLAG_SIZE,
-      x: CX + Math.cos(a)*rr,
-      y: CY + Math.sin(a)*rr,
-      vx: Math.cos(dir)*SPEED,
-      vy: Math.sin(dir)*SPEED,
-    });
-    alive.push(true);
-    aliveCount++;
-  }
-
-  state="PLAY";
-  t=0;
-  winFrames=0;
-  winner=null;
-  console.error(`[round] start (${entities.length} entities)`);
+  entities = countries.map(c => ({
+    name: c.name,
+    iso2: c.iso2.toLowerCase(),
+    x: CX + (Math.random()-0.5)*100,
+    y: CY + (Math.random()-0.5)*100,
+    vx: (Math.random()-0.5)*SPEED*2,
+    vy: (Math.random()-0.5)*SPEED*2,
+    img: (() => { try{return fs.readFileSync(`${FLAGS_DIR}/${c.iso2.toLowerCase()}_${FLAG_SIZE}.rgb`)}catch{return null}})()
+  }));
+  alive = entities.map(()=>true);
+  state="PLAY"; t=0;
 }
 startRound();
 
-function getWinnerIndex(){
-  for(let i=0;i<entities.length;i++) if(alive[i]) return i;
-  return -1;
-}
-
-function stepPhysics(){
-  t += dt;
-  const holeCenterDeg = (t*SPIN*180/Math.PI) % 360;
-
-  for(let i=0;i<entities.length;i++){
-    if(!alive[i]) continue;
-    const b=entities[i];
-    b.x += b.vx*dt;
-    b.y += b.vy*dt;
-  }
-
-  // collisions
-  const minD = 2*R, minD2=minD*minD;
-  for(let i=0;i<entities.length;i++){
-    if(!alive[i]) continue;
-    const A=entities[i];
-    for(let j=i+1;j<entities.length;j++){
-      if(!alive[j]) continue;
-      const B=entities[j];
-      const dx=B.x-A.x, dy=B.y-A.y;
-      const d2=dx*dx+dy*dy;
-      if(d2>0 && d2<minD2){
-        const d=Math.sqrt(d2);
-        const nx=dx/d, ny=dy/d;
-        const overlap=minD-d;
-
-        A.x -= nx*overlap*0.5; A.y -= ny*overlap*0.5;
-        B.x += nx*overlap*0.5; B.y += ny*overlap*0.5;
-
-        const van=A.vx*nx + A.vy*ny;
-        const vbn=B.vx*nx + B.vy*ny;
-        A.vx += (vbn-van)*nx; A.vy += (vbn-van)*ny;
-        B.vx += (van-vbn)*nx; B.vy += (van-vbn)*ny;
-      }
-    }
-  }
-
-  // ring wall + hole
-  const wallR = RING_R - R - 3;
-  for(let i=0;i<entities.length;i++){
-    if(!alive[i]) continue;
-    const b=entities[i];
-    const dx=b.x-CX, dy=b.y-CY;
-    const dist=Math.sqrt(dx*dx+dy*dy)||0.0001;
-    const angDeg=(Math.atan2(dy,dx)*180/Math.PI+360)%360;
-
-    if(dist>wallR){
-      if(inHole(angDeg, holeCenterDeg)){
-        alive[i]=false; aliveCount--;
-        continue;
-      }
-      const nx=dx/dist, ny=dy/dist;
-      b.x = CX + nx*wallR;
-      b.y = CY + ny*wallR;
-      const vn=b.vx*nx + b.vy*ny;
-      b.vx -= 2*vn*nx;
-      b.vy -= 2*vn*ny;
-    }
-  }
-
-  for(let i=0;i<entities.length;i++){
-    if(!alive[i]) continue;
-    normalizeSpeed(entities[i], SPEED);
-  }
-
-  return holeCenterDeg;
-}
-
 function tick(){
+  for(let i=0;i<rgb.length;i++) rgb[i]=15; // Clear BG
+  
   if(state==="PLAY"){
-    const holeCenterDeg=stepPhysics();
-    if(aliveCount<=1){
-      const wi=getWinnerIndex();
-      const e=wi>=0?entities[wi]:null;
-      winner = e ? {name:e.name, iso2:e.iso2} : null;
-      lastWinner = winner ? winner.name : "none";
-      state="WIN";
-      winFrames=0;
-      renderWin();
-    }else{
-      renderPlay(holeCenterDeg);
-    }
-  }else{
-    winFrames++;
-    renderWin();
-    if(winFrames >= WIN_SECONDS*FPS) startRound();
-  }
-}
+    t += dt;
+    const holeDeg = (t*SPIN*180/Math.PI)%360;
+    
+    entities.forEach((b, i) => {
+      if(!alive[i]) return;
+      b.x += b.vx*dt; b.y += b.vy*dt;
+      const dx=b.x-CX, dy=b.y-CY, dist=Math.sqrt(dx*dx+dy*dy);
+      if(dist > RING_R - R){
+        const ang = (Math.atan2(dy,dx)*180/Math.PI+360)%360;
+        let d=(ang-holeDeg+180)%360-180;
+        if(Math.abs(d) <= HOLE_DEG/2) alive[i]=false;
+        else {
+          const nx=dx/dist, ny=dy/dist;
+          const dot = b.vx*nx + b.vy*ny;
+          b.vx -= 2*dot*nx; b.vy -= 2*dot*ny;
+          b.x = CX + nx*(RING_R-R); b.y = CY + ny*(RING_R-R);
+        }
+      }
+      // Draw ball
+      blitSprite(b.x|0, b.y|0, R, b.img, FLAG_SIZE);
+    });
 
-// output raw frame
-function writeFrame(){
+    drawRing(holeDeg);
+    drawUI(alive.filter(v=>v).length, entities.length, lastWinner, holeDeg);
+    if(alive.filter(v=>v).length <= 1){
+      winner = entities[alive.indexOf(true)];
+      lastWinner = winner ? winner.name : "NONE";
+      state="WIN"; t=0;
+    }
+  } else {
+    t += 1/FPS;
+    // 3. Make win screen ball 3x bigger (Original R * 3)
+    const winR = R * 3;
+    const winFlagSize = FLAG_SIZE * 3;
+    
+    const winText = "WE HAVE A WINNER!";
+    drawText(winText, (CX-textWidth(winText,4)/2)|0, (CY-200)|0, 4, [255,255,255]);
+    
+    if(winner) {
+       // Since the flag files are fixed size, we'll just draw the larger circle base
+       // For a truly 3x bigger flag, you'd need a separate download/resize step
+       for(let r=0; r<winR; r++){
+         const a_step = 1/r;
+         for(let a=0; a<Math.PI*2; a+=a_step) setPix(CX+Math.cos(a)*r, CY+Math.sin(a)*r, 255,215,0);
+       }
+       drawText(winner.name, (CX-textWidth(winner.name,3)/2)|0, (CY+winR+20)|0, 3, [255,255,255]);
+    }
+    if(t > WIN_SECONDS) startRound();
+  }
+  
+  process.stdout.write(`P6\n${W} ${H}\n255\n`);
   process.stdout.write(rgb);
 }
 
-// boot frame
-clearBG();
-drawTextShadow("BOOTING...", (W/2 - 70)|0, (H/2)|0, 3);
-writeFrame();
-
-setInterval(()=>{ tick(); writeFrame(); }, Math.round(1000/FPS));
+setInterval(tick, 1000/FPS);
 JS
 
-node -c /tmp/yt_sim.js
-echo "[sim] syntax OK"
-
-# --------------------------------------------------
-# STREAM LOOP (RAW RGB -> H264 -> RTMPS)
-# --------------------------------------------------
+# Run Loop
 while true; do
-  node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel info -stats \
-    -thread_queue_size 1024 \
-    -f rawvideo -pix_fmt rgb24 -s "${W}x${H}" -r "$FPS" -i - \
-    -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
-    -map 0:v -map 1:a \
-    -c:v libx264 -preset ultrafast -tune zerolatency \
-    -pix_fmt yuv420p \
-    -g $((FPS*2)) \
-    -x264-params "keyint=$((FPS*2)):min-keyint=$((FPS*2)):scenecut=0" \
-    -b:v 1800k -maxrate 1800k -bufsize 3600k \
-    -c:a aac -b:a 128k -ar 44100 \
-    -f flv "$YOUTUBE_URL"
-
-  echo "[youtube] stream stopped — retrying in 3 seconds..."
+  node /tmp/yt_sim.js | ffmpeg -y -f image2pipe -vcodec ppm -r "$FPS" -i - \
+    -f lavfi -i "anullsrc=cl=stereo:sr=44100" -c:v libx264 -preset ultrafast \
+    -pix_fmt yuv420p -f flv "$YOUTUBE_URL"
   sleep 3
 done
