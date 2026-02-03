@@ -13,29 +13,35 @@ export H=1920
 export FLAGS_DIR="/tmp/flags"
 mkdir -p "$FLAGS_DIR"
 
-# --- High-Speed Asset Loader ---
+# --- Fixed Asset Loader with Retries ---
 download_flag () {
   local iso=$(echo "$1" | tr 'A-Z' 'a-z')
+  # Skip if already exists and isn't empty
   [ -s "$FLAGS_DIR/${iso}_70.rgb" ] && return 0
+  
   local png="$FLAGS_DIR/${iso}.png"
-  if curl -m 3 -fsSL "https://flagcdn.com/w160/${iso}.png" -o "$png"; then
+  # Increased timeout to 10s and added 3 retries for stability
+  if curl --retry 3 --retry-delay 2 -m 10 -fsSL "https://flagcdn.com/w160/${iso}.png" -o "$png"; then
     ffmpeg -loglevel error -y -i "$png" -vf "scale=70:70" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_70.rgb" || true
     ffmpeg -loglevel error -y -i "$png" -vf "scale=42:42" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_42.rgb" || true
     ffmpeg -loglevel error -y -i "$png" -vf "scale=240:240" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_240.rgb" || true
     rm -f "$png"
+  else
+    echo "Warning: Could not download flag for $iso"
   fi
 }
 export -f download_flag
 
-echo "--- Syncing All Flags ---"
-grep -oP '"iso2":\s*"\K[^"]+' countries.json | xargs -P 10 -I {} bash -c 'download_flag "{}"'
+echo "--- Syncing 193 Flags (With Retries) ---"
+# Reduced parallel jobs to 5 to avoid triggering CDN rate limits/timeouts
+grep -oP '"iso2":\s*"\K[^"]+' countries.json | xargs -P 5 -I {} bash -c 'download_flag "{}"'
 
 # --- Node.js Graphics & Physics Engine ---
 cat > /tmp/yt_sim.js <<'JS'
 const fs = require('fs');
 const W=1080, H=1920, FPS=60, DT=1/60;
-const R=18, RING_R=240; // Arena is now ~2x smaller
-const CX=W/2, CY=500;   // Arena positioned in top half
+const R=18, RING_R=240; 
+const CX=W/2, CY=500;   
 const FLAGS_DIR="/tmp/flags";
 const rgb = Buffer.alloc(W * H * 3);
 
@@ -73,7 +79,6 @@ function init(){
 }
 
 function drawUI(){
-  // Status Bars
   for(let i=0;i<3;i++) {
     const c = [35,35,40];
     for(let y=40;y<140;y++) for(let x=40+i*340;x<340+i*340;x++){
@@ -86,7 +91,6 @@ function drawUI(){
   drawT(ents.filter(e=>!e.f).length.toString(), 400, 85, 2, [255,255,255]);
   drawT("!67 = BAN", 760, 75, 4, [255, 60, 60]);
 
-  // Clean Lose Grid (Below Arena)
   for(let y=1000;y<1920;y++) for(let x=0;x<W;x++){
     const idx=(y*W+x)*3; rgb[idx]=12; rgb[idx+1]=12; rgb[idx+2]=15;
   }
@@ -97,13 +101,11 @@ function drawUI(){
 }
 
 function loop(){
-  // Main background color
   for(let i=0;i<rgb.length;i+=3){ rgb[i]=165; rgb[i+1]=110; rgb[i+2]=85; }
   const hDeg=(Date.now()/1000*1.5*60)%360;
   drawUI();
   
   if(state==="PLAY"){
-    // 2x Smaller Arena Circle
     for(let a=0;a<360;a+=0.4){
       let diff=Math.abs(((a-hDeg+180)%360)-180);
       if(diff<22) continue; 
@@ -123,7 +125,6 @@ function loop(){
         return;
       }
 
-      // Physics logic
       for(let j=i+1;j<ents.length;j++){
         let b=ents[j]; if(b.f) continue;
         let dx=b.x-e.x, dy=b.y-e.y, d=Math.sqrt(dx*dx+dy*dy);
@@ -156,7 +157,6 @@ function loop(){
       winStats[winner.n] = (winStats[winner.n]||0) + 1;
     }
   } else {
-    // Win Card
     for(let y=300;y<800;y++) for(let x=150;x<930;x++){
       const idx=(y*W+x)*3; rgb[idx]=25; rgb[idx+1]=35; rgb[idx+2]=80;
     }
@@ -171,7 +171,7 @@ init();
 setInterval(loop, 1000/FPS);
 JS
 
-# --- Final FFmpeg Loop ---
+# --- FFmpeg Command ---
 while true; do
   node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel error -y \
     -f rawvideo -pixel_format rgb24 -video_size 1080x1920 -framerate 60 -i - \
