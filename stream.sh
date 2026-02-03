@@ -20,22 +20,23 @@ download_flag () {
   local png="$FLAGS_DIR/${iso}.png"
   if curl -m 3 -fsSL "https://flagcdn.com/w160/${iso}.png" -o "$png"; then
     ffmpeg -loglevel error -y -i "$png" -vf "scale=70:70" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_70.rgb" || true
-    ffmpeg -loglevel error -y -i "$png" -vf "scale=40:40" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_40.rgb" || true
+    ffmpeg -loglevel error -y -i "$png" -vf "scale=42:42" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_42.rgb" || true
     ffmpeg -loglevel error -y -i "$png" -vf "scale=240:240" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_240.rgb" || true
     rm -f "$png"
   fi
 }
 export -f download_flag
 
-# --- Pre-download all 193 flags ---
-echo "--- Downloading All 193 Flags ---"
+echo "--- Syncing All Flags ---"
 grep -oP '"iso2":\s*"\K[^"]+' countries.json | xargs -P 10 -I {} bash -c 'download_flag "{}"'
 
-# --- Node.js Engine ---
+# --- Node.js Graphics & Physics Engine ---
 cat > /tmp/yt_sim.js <<'JS'
 const fs = require('fs');
-const W=1080, H=1920, FPS=60, R=22, RING_R=440, DT=1/60; // Smaller R to fit 193 balls
-const CX=W/2, CY=H/2, FLAGS_DIR="/tmp/flags";
+const W=1080, H=1920, FPS=60, DT=1/60;
+const R=18, RING_R=240; // Arena is now ~2x smaller
+const CX=W/2, CY=500;   // Arena positioned in top half
+const FLAGS_DIR="/tmp/flags";
 const rgb = Buffer.alloc(W * H * 3);
 
 const FONT={'A':[14,17,17,31,17,17,17],'B':[30,17,30,17,17,17,30],'C':[14,17,16,16,16,17,14],'D':[30,17,17,17,17,17,30],'E':[31,16,30,16,16,16,31],'F':[31,16,30,16,16,16,16],'G':[14,17,16,23,17,17,14],'H':[17,17,17,31,17,17,17],'I':[14,4,4,4,4,4,14],'J':[7,2,2,2,2,18,12],'K':[17,18,20,24,20,18,17],'L':[16,16,16,16,16,16,31],'M':[17,27,21,17,17,17,17],'N':[17,25,21,19,17,17,17],'O':[14,17,17,17,17,17,14],'P':[30,17,17,30,16,16,16],'Q':[14,17,17,17,21,18,13],'R':[30,17,17,30,18,17,17],'S':[15,16,14,1,1,17,14],'T':[31,4,4,4,4,4,4],'U':[17,17,17,17,17,17,14],'V':[17,17,17,17,17,10,4],'W':[17,17,17,21,21,27,17],'X':[17,17,10,4,10,17,17],'Y':[17,17,10,4,4,4,4],'Z':[31,1,2,4,8,16,31],'0':[14,17,19,21,25,17,14],'1':[4,12,4,4,4,4,14],'2':[14,17,1,6,8,16,31],'3':[30,1,1,14,1,1,30],'4':[2,6,10,18,31,2,2],'5':[31,16,30,1,1,17,14],'6':[6,8,16,30,17,17,14],'7':[31,1,2,4,8,8,8],'8':[14,17,17,14,17,17,14],'9':[14,17,17,15,1,2,12],' ':[0,0,0,0,0,0,0],'!':[4,4,4,4,0,0,4],':':[0,0,4,0,4,0,0],'.':[0,0,0,0,0,0,4]};
@@ -66,62 +67,63 @@ const countries = JSON.parse(fs.readFileSync('countries.json', 'utf8'));
 
 function init(){
   ents=countries.sort(()=>0.5-Math.random()).map(c=>({
-    n:c.name, i:c.iso2.toLowerCase(), x:CX, y:CY, vx:(Math.random()-0.5)*1200, vy:(Math.random()-0.5)*1200, a:true, f:false
+    n:c.name, i:c.iso2.toLowerCase(), x:CX, y:CY, vx:(Math.random()-0.5)*1000, vy:(Math.random()-0.5)*1000, f:false
   }));
   deadStack=[]; state="PLAY";
 }
 
 function drawUI(){
-  // Header Info
+  // Status Bars
   for(let i=0;i<3;i++) {
-    const c = (i===0)? [25,25,30] : [40,40,45];
-    for(let y=60;y<180;y++) for(let x=40+i*340;x<340+i*340;x++){
+    const c = [35,35,40];
+    for(let y=40;y<140;y++) for(let x=40+i*340;x<340+i*340;x++){
       const idx=(y*W+x)*3; rgb[idx]=c[0]; rgb[idx+1]=c[1]; rgb[idx+2]=c[2];
     }
   }
-  drawT("LAST WINNER", 60, 80, 1, [180,180,180]);
-  drawT(lastWin.substring(0,14), 60, 110, 2, [255,255,255]);
-  drawT("ALIVE", 400, 80, 1, [180,180,180]);
-  drawT(ents.filter(e=>!e.f).length.toString(), 400, 110, 2, [255,255,255]);
-  drawT("!67 = BAN", 760, 105, 4, [255, 50, 50]);
+  drawT("LAST WINNER", 60, 60, 1, [150,150,150]);
+  drawT(lastWin.substring(0,12), 60, 85, 2, [255,255,255]);
+  drawT("ALIVE", 400, 60, 1, [150,150,150]);
+  drawT(ents.filter(e=>!e.f).length.toString(), 400, 85, 2, [255,255,255]);
+  drawT("!67 = BAN", 760, 75, 4, [255, 60, 60]);
 
-  // Expanded Lose Area (Fits 193)
-  for(let y=1100;y<1900;y++) for(let x=0;x<W;x++){
-    const idx=(y*W+x)*3; rgb[idx]=15; rgb[idx+1]=15; rgb[idx+2]=20;
+  // Clean Lose Grid (Below Arena)
+  for(let y=1000;y<1920;y++) for(let x=0;x<W;x++){
+    const idx=(y*W+x)*3; rgb[idx]=12; rgb[idx+1]=12; rgb[idx+2]=15;
   }
   deadStack.forEach((e, idx) => {
     const col=idx%11, row=Math.floor(idx/11);
-    blit(95+col*88, 1150+row*45, 18, e.i, 40); // Smaller flag size for the grid
+    blit(95+col*88, 1060+row*48, 18, e.i, 42); 
   });
 }
 
 function loop(){
-  for(let i=0;i<rgb.length;i+=3){ rgb[i]=158; rgb[i+1]=100; rgb[i+2]=75; }
-  const hDeg=(Date.now()/1000*1.5*60)%360; // Slightly faster hole rotation
+  // Main background color
+  for(let i=0;i<rgb.length;i+=3){ rgb[i]=165; rgb[i+1]=110; rgb[i+2]=85; }
+  const hDeg=(Date.now()/1000*1.5*60)%360;
   drawUI();
   
   if(state==="PLAY"){
-    // Ring Logic
-    for(let a=0;a<360;a+=0.3){
+    // 2x Smaller Arena Circle
+    for(let a=0;a<360;a+=0.4){
       let diff=Math.abs(((a-hDeg+180)%360)-180);
-      if(diff<22)continue; // Hole size
+      if(diff<22) continue; 
       const r=a*Math.PI/180;
-      for(let t=-12;t<12;t++){
+      for(let t=-10;t<10;t++){
         const px=Math.floor(CX+(RING_R+t)*Math.cos(r)), py=Math.floor(CY+(RING_R+t)*Math.sin(r));
-        if(px>=0&&px<W&&py>=0&&py<H){ const idx=(py*W+px)*3; rgb[idx]=255; rgb[idx+1]=255; rgb[idx+2]=255; }
+        if(px>=0&&px<W&&py>=0&&py<H){ const idx=(py*W+px)*3; rgb[idx]=240; rgb[idx+1]=240; rgb[idx+2]=240; }
       }
     }
 
     ents.forEach((e, i) => {
       if(e.f){ 
         const targetIdx = deadStack.indexOf(e);
-        const tx = 95 + (targetIdx%11)*88, ty = 1150 + Math.floor(targetIdx/11)*45;
-        e.x += (tx - e.x) * 0.15; e.y += (ty - e.y) * 0.15;
-        blit(e.x, e.y, 18, e.i, 40);
+        const tx = 95 + (targetIdx%11)*88, ty = 1060 + Math.floor(targetIdx/11)*48;
+        e.x += (tx - e.x) * 0.12; e.y += (ty - e.y) * 0.12;
+        blit(e.x, e.y, 18, e.i, 42);
         return;
       }
 
-      // Simple collision optimization for 193 balls
+      // Physics logic
       for(let j=i+1;j<ents.length;j++){
         let b=ents[j]; if(b.f) continue;
         let dx=b.x-e.x, dy=b.y-e.y, d=Math.sqrt(dx*dx+dy*dy);
@@ -141,7 +143,7 @@ function loop(){
           e.f=true; deadStack.push(e);
         } else {
           let nx=dx/dist, ny=dy/dist, dot=e.vx*nx+e.vy*ny;
-          e.vx=(e.vx-2*dot*nx)*1.01; e.vy=(e.vy-2*dot*ny)*1.01;
+          e.vx=(e.vx-2*dot*nx)*1.015; e.vy=(e.vy-2*dot*ny)*1.015;
           e.x=CX+nx*(RING_R-R); e.y=CY+ny*(RING_R-R);
         }
       }
@@ -154,14 +156,14 @@ function loop(){
       winStats[winner.n] = (winStats[winner.n]||0) + 1;
     }
   } else {
-    // Win Screen
-    for(let y=400;y<1000;y++) for(let x=100;x<980;x++){
-      const idx=(y*W+x)*3; rgb[idx]=30; rgb[idx+1]=45; rgb[idx+2]=95;
+    // Win Card
+    for(let y=300;y<800;y++) for(let x=150;x<930;x++){
+      const idx=(y*W+x)*3; rgb[idx]=25; rgb[idx+1]=35; rgb[idx+2]=80;
     }
-    drawT("WINNER!", 430, 450, 6, [255,255,255]);
-    blit(W/2, 700, 100, winner.i, 240);
-    drawT(winner.n, 350, 880, 3, [255,255,255]);
-    if(++timer > 400) init();
+    drawT("WINNER!", 430, 350, 6, [255,255,255]);
+    blit(W/2, 580, 100, winner.i, 240);
+    drawT(winner.n, 350, 720, 3, [255,255,255]);
+    if(++timer > 360) init();
   }
   process.stdout.write(rgb);
 }
@@ -169,13 +171,13 @@ init();
 setInterval(loop, 1000/FPS);
 JS
 
-# --- Optimized Streaming ---
+# --- Final FFmpeg Loop ---
 while true; do
   node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel error -y \
     -f rawvideo -pixel_format rgb24 -video_size 1080x1920 -framerate 60 -i - \
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
     -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p \
-    -x264-params "nal-hrd=cbr" -b:v 6500k -minrate 6500k -maxrate 6500k -bufsize 13000k \
+    -x264-params "nal-hrd=cbr" -b:v 6000k -minrate 6000k -maxrate 6000k -bufsize 12000k \
     -g 120 -f flv "$YOUTUBE_URL"
   sleep 2
 done
