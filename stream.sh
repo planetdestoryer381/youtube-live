@@ -5,8 +5,7 @@ set -euo pipefail
 # 🔑 YOUR STREAM KEY
 # =========================
 : "${YT_STREAM_KEY:?Missing YT_STREAM_KEY}"
-# example:
-# export YT_STREAM_KEY="u0d7-eetf-a97p-uer8-18ju"
+export YT_STREAM_KEY="u0d7-eetf-a97p-uer8-18ju"
 
 # =========================
 # 🎬 VERTICAL SHORTS SETTINGS
