@@ -19,8 +19,8 @@ export W="${W:-720}"
 export H="${H:-1280}"
 export RESTART_SECONDS="${RESTART_SECONDS:-21000}"
 
-export BALL_R="${BALL_R:-20}"
-export RING_R="${RING_R:-380}"
+export BALL_R="${BALL_R:-10}"
+export RING_R="${RING_R:-200}"
 export HOLE_DEG="${HOLE_DEG:-70}"
 export SPIN="${SPIN:-0.9}"
 export SPEED="${SPEED:-100}"
@@ -356,7 +356,7 @@ function fmtCountdown(sec){
   const h = (sec/3600)|0;
   const m = ((sec%3600)/60)|0;
   const s = (sec%60)|0;
-  return `${h} hours ${m} minutes ${s} seconds till stream restarts`;
+  return `RESTART IN ${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 
 // game state
