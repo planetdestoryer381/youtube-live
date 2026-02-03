@@ -1,4 +1,4 @@
-name: Twitch Physics Ring
+name: Twitch + YouTube Physics Ring
 
 on:
   workflow_dispatch:
@@ -20,8 +20,9 @@ jobs:
       - name: Install FFmpeg + curl
         run: sudo apt-get update && sudo apt-get install -y ffmpeg curl
 
-      - name: Stream
+      - name: Stream (Twitch + YouTube)
         env:
+          # --- Twitch (unchanged) ---
           STREAM_KEY: ${{ secrets.STREAM_KEY }}
           TWITCH_OAUTH: ${{ secrets.TWITCH_OAUTH }}
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
@@ -30,6 +31,16 @@ jobs:
           TWITCH_CHANNEL: countryballer2134
           TWITCH_NICK: countryballer2134
 
+          # --- YouTube (new) ---
+          YT_STREAM_KEY: ${{ secrets.YT_STREAM_KEY }}
+
+          # If you want YouTube chat "me" to work (new):
+          YT_ACCESS_TOKEN: ${{ secrets.YT_ACCESS_TOKEN }}
+          YT_LIVE_CHAT_ID: ${{ secrets.YT_LIVE_CHAT_ID }}
+          # OR instead of YT_LIVE_CHAT_ID, you can use:
+          # YT_VIDEO_ID: ${{ secrets.YT_VIDEO_ID }}
+
+          # --- Game settings (shared) ---
           FPS: "20"
           W: "854"
           H: "480"
