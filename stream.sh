@@ -13,13 +13,23 @@ export H=1920
 export FLAGS_DIR="/tmp/flags"
 mkdir -p "$FLAGS_DIR"
 
+# --- 🛑 MANDATORY CONNECTION CHECK 🛑 ---
+verify_stream_path() {
+  echo "--- RULE: CHECKING IF STREAM WORKS ---"
+  # Try to open a TCP connection to the YouTube RTMP port (1935)
+  if ! timeout 3 bash -c "cat < /dev/null > /dev/tcp/a.rtmp.youtube.com/1935" 2>/dev/null; then
+    echo "❌ ERROR: Cannot reach YouTube RTMP server. Check firewall/internet."
+    return 1
+  fi
+  echo "✅ SUCCESS: YouTube Ingest is reachable."
+  return 0
+}
+
 # --- Graphics Engine ---
 cat > /tmp/yt_sim.js <<'JS'
 const fs=require('fs');const W=1080,H=1920,FPS=60,DT=1/60;
 const R=16, RING_R=125, CX=W/2;
-// Everything shifted down for Mobile UI clarity
-const CY=880; 
-const UI_TOP=280; 
+const CY=880, UI_TOP=280; 
 const FLAGS_DIR="/tmp/flags";
 const rgb=Buffer.alloc(W*H*3);
 
@@ -36,19 +46,15 @@ function init(){
 }
 
 function drawUI(){
-  // Box 1: Stats Header (Bigger Fonts)
   const statsY = 580;
   for(let y=statsY;y<statsY+140;y++)for(let x=100;x<W-100;x++){const idx=(y*W+x)*3;rgb[idx]=25;rgb[idx+1]=25;rgb[idx+2]=30;}
-  // Labels are now scale 2 (Bigger)
+  // Labels made scale 2 (Bigger) per your request
   drawT("LAST WINNER",140,statsY+20,2,[150,150,150]); 
   drawT(lastWin.substring(0,14),140,statsY+70,3,[255,255,255]);
-  
-  drawT("ALIVE",580,statsY+20,2,[150,150,150]);
+  drawT("ALIVE",580,statsY+20,2,[150,150,150]); // Font scale increased
   drawT(ents.filter(e=>!e.f).length.toString(),580,statsY+70,3,[255,255,255]);
-  
   drawT("!67=BAN",820,statsY+45,4,[255,50,50]);
 
-  // Box 2: Leaderboard Header
   for(let y=UI_TOP;y<UI_TOP+280;y++)for(let x=100;x<W-100;x++){const idx=(y*W+x)*3;rgb[idx]=15;rgb[idx+1]=15;rgb[idx+2]=20;}
   drawT("LEADERBOARD",140,UI_TOP+20,3,[255,255,100]);
   const l=Object.entries(winStats).sort((a,b)=>b[1]-a[1]).slice(0,5);
@@ -69,10 +75,7 @@ function loop(){
   for(let i=0;i<rgb.length;i+=3){rgb[i]=165;rgb[i+1]=110;rgb[i+2]=85;}
   const hDeg=(Date.now()/1000*1.5*60)%360;drawUI();
   if(state==="PLAY"){
-    // Arena
     for(let a=0;a<360;a+=0.5){let diff=Math.abs(((a-hDeg+180)%360)-180);if(diff<22)continue;const r=a*Math.PI/180;for(let t=-6;t<6;t++){const px=Math.floor(CX+(RING_R+t)*Math.cos(r)),py=Math.floor(CY+(RING_R+t)*Math.sin(r));if(px>=0&&px<W&&py>=0&&py<H){const idx=(py*W+px)*3;rgb[idx]=255;rgb[idx+1]=255;rgb[idx+2]=255;}}}
-    
-    // Balls Physics
     ents.forEach((e,i)=>{
       if(e.f){
         const ti=deadStack.indexOf(e);
@@ -92,9 +95,8 @@ function loop(){
       let dx=e.x-CX,dy=e.y-CY,dist=Math.sqrt(dx*dx+dy*dy);
       if(dist>RING_R-R){
         const ang=(Math.atan2(dy,dx)*180/Math.PI+360)%360;
-        if(Math.abs(((ang-hDeg+180)%360)-180)<22){
-          e.f=true;deadStack.push(e);
-        } else {
+        if(Math.abs(((ang-hDeg+180)%360)-180)<22){ e.f=true;deadStack.push(e); }
+        else {
           let nx=dx/dist,ny=dy/dist,dot=e.vx*nx+e.vy*ny;
           e.vx=(e.vx-2*dot*nx)*1.02;e.vy=(e.vy-2*dot*ny)*1.02;
           e.x=CX+nx*(RING_R-R);e.y=CY+ny*(RING_R-R);
@@ -105,7 +107,6 @@ function loop(){
     let alive=ents.filter(e=>!e.f);
     if(alive.length===1){state="WIN";winner=alive[0];lastWin=winner.n;timer=0;winStats[winner.n]=(winStats[winner.n]||0)+1;}
   } else {
-    // Win Screen Logic (Visible Flag Fixed)
     for(let y=700;y<1150;y++)for(let x=150;x<W-150;x++){const idx=(y*W+x)*3;rgb[idx]=30;rgb[idx+1]=40;rgb[idx+2]=100;}
     drawT("WINNER!",CX-140,740,5,[255,255,255]);
     if(winner) blit(CX, 930, winner.i, 240, 110); 
@@ -116,13 +117,16 @@ function loop(){
 init();setInterval(loop,1000/FPS);
 JS
 
-# --- RUN ---
+# --- THE START ---
 while true; do
-  node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel warning -y \
-    -f rawvideo -pixel_format rgb24 -video_size 1080x1920 -framerate 60 -i - \
-    -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
-    -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
-    -g 120 -b:v 8000k -minrate 8000k -maxrate 8000k -bufsize 16000k \
-    -f flv "$YOUTUBE_URL"
+  if verify_stream_path; then
+    node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel warning -y \
+      -f rawvideo -pixel_format rgb24 -video_size 1080x1920 -framerate 60 -i - \
+      -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
+      -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
+      -g 120 -b:v 8000k -minrate 8000k -maxrate 8000k -bufsize 16000k \
+      -f flv "$YOUTUBE_URL"
+  fi
+  echo "Retrying stream handshake in 5s..."
   sleep 5
 done
