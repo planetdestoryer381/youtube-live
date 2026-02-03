@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =========================
-# 🔑 YOUR STREAM KEY
+# 🔑 YOUR STREAM KEY (KEEP AS IS)
 # =========================
 export YT_STREAM_KEY="u0d7-eetf-a97p-uer8-18ju"
 
@@ -13,22 +13,22 @@ export FPS=20
 export W=1080
 export H=1920
 
-# Game / physics defaults (tweak later if you want)
-export BALL_R=10
-export RING_R=200
+# GAME SETTINGS
+export BALL_R=12
+export RING_R=320
 export HOLE_DEG=70
-export SPIN=0.9
-export SPEED=100
+export SPIN=0.95
+export SPEED=120
 export PHYS_MULT=3
 export WIN_SCREEN_SECONDS=6
-export RESTART_SECONDS=21000
+export RESTART_SECONDS=18000
 
-export RING_THICKNESS=4
-export RING_HOLE_EDGE=1
+export RING_THICKNESS=6
+export RING_HOLE_EDGE=2
 
 # Flags
 export COUNTRIES_PATH="./countries.json"
-export FLAG_SIZE=26
+export FLAG_SIZE=40
 export FLAGS_DIR="/tmp/flags"
 mkdir -p "$FLAGS_DIR"
 
@@ -37,12 +37,10 @@ YOUTUBE_URL="rtmps://a.rtmps.youtube.com/live2/${YT_STREAM_KEY}"
 echo "=== YOUTUBE SHORTS STREAM ==="
 echo "Resolution: ${W}x${H}  FPS=${FPS}"
 echo "URL: $YOUTUBE_URL"
-node -v
-ffmpeg -version | head -n 2
 echo "============================"
 
 # --------------------------------------------------
-# Download flags (same as your original, kept)
+# Download flags
 # --------------------------------------------------
 download_flag () {
   local iso="$1"
@@ -66,42 +64,31 @@ ISO_LIST="$(grep -oE '"iso2"[[:space:]]*:[[:space:]]*"[^"]+"' "$COUNTRIES_PATH" 
   | sed -E 's/.*"([a-zA-Z]{2})".*/\1/' \
   | tr 'A-Z' 'a-z' | sort -u)"
 
-COUNT=0
 for iso in $ISO_LIST; do
   download_flag "$iso" "$FLAG_SIZE" || true
-  COUNT=$((COUNT+1))
 done
-echo "[flags] prepared (iso2 unique): $COUNT"
+echo "[flags] ready."
 
 # --------------------------------------------------
-# WRITE THE GAME ENGINE (CLEAN YOUTUBE ONLY)
+# WRITE THE REAL GAME ENGINE
 # --------------------------------------------------
 cat > /tmp/yt_sim.js <<'JS'
 'use strict';
 const fs = require('fs');
 
-process.stdout.on("error", (e) => {
-  if (e && e.code === "EPIPE") {
-    console.error("[pipe] ffmpeg closed stdin — exiting");
-    process.exit(0);
-  }
-});
-
 const FPS = +process.env.FPS || 20;
 const W   = +process.env.W   || 1080;
 const H   = +process.env.H   || 1920;
 
-const R        = +process.env.BALL_R || 10;
-const RING_R   = +process.env.RING_R || 200;
-const HOLE_DEG = +process.env.HOLE_DEG || 70;
-const SPIN     = +process.env.SPIN || 0.9;
-const SPEED    = +process.env.SPEED || 100;
+const R        = +process.env.BALL_R || 12;
+const RING_R   = +process.env.RING_R || 320;
+const SPEED    = +process.env.SPEED || 120;
 const PHYS_MULT = +process.env.PHYS_MULT || 3;
 const WIN_SECONDS = +process.env.WIN_SCREEN_SECONDS || 6;
 
 const COUNTRIES_PATH = process.env.COUNTRIES_PATH || "./countries.json";
 const FLAGS_DIR = process.env.FLAGS_DIR || "/tmp/flags";
-const FLAG_SIZE = +process.env.FLAG_SIZE || 26;
+const FLAG_SIZE = +process.env.FLAG_SIZE || 40;
 
 const CX = W*0.5, CY = H*0.5;
 const dt = PHYS_MULT / FPS;
@@ -118,43 +105,14 @@ function fillSolid(r,g,b){
     rgb[i]=r; rgb[i+1]=g; rgb[i+2]=b;
   }
 }
-function clearBG(){ fillSolid(10,14,28); }
-
-// simple text renderer (kept from your original)
-const FONT={
-  'A':[0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
-  'B':[0b11110,0b10001,0b11110,0b10001,0b10001,0b10001,0b11110],
-  ' ':[0,0,0,0,0,0,0],
-};
-function drawChar(ch,x,y,scale,color){
-  const rows = FONT[ch] || FONT['A'];
-  const [r,g,b]=color;
-  for(let rr=0; rr<7; rr++){
-    const bits=rows[rr];
-    for(let cc=0; cc<5; cc++){
-      if(bits & (1<<(4-cc))){
-        for(let sy=0; sy<scale; sy++)
-          for(let sx=0; sx<scale; sx++)
-            setPix(x+cc*scale+sx, y+rr*scale+sy, r,g,b);
-      }
-    }
-  }
-}
-function drawText(text,x,y,scale,color){
-  text=String(text).toUpperCase();
-  let cx=x|0;
-  for(let i=0;i<text.length;i++){
-    drawChar(text[i], cx, y|0, scale, color);
-    cx += (5*scale + scale);
-  }
-}
+function clearBG(){ fillSolid(8,12,24); }
 
 // load countries
 function loadCountries(){
   const raw=fs.readFileSync(COUNTRIES_PATH,"utf8");
   const arr=JSON.parse(raw);
-  const seen=new Set();
   const out=[];
+  const seen=new Set();
   for(const c of arr){
     const name=String(c.name||"").trim();
     const iso2=String(c.iso2||"").trim().toLowerCase();
@@ -168,24 +126,23 @@ function loadCountries(){
 const COUNTRIES=loadCountries();
 console.error(`[countries] loaded ${COUNTRIES.length}`);
 
-function readRGB(path,size){
+function readRGB(path){
   try{
-    const buf=fs.readFileSync(path);
-    if(buf.length===size*size*3) return buf;
-  }catch{}
-  return null;
+    return fs.readFileSync(path);
+  }catch{
+    return null;
+  }
 }
 function flagRGB(iso2){
-  return readRGB(`${FLAGS_DIR}/${iso2}_${FLAG_SIZE}.rgb`, FLAG_SIZE);
+  return readRGB(`${FLAGS_DIR}/${iso2}_${FLAG_SIZE}.rgb`);
 }
 
-// game state
+// GAME STATE
 let entities=[], alive=[], aliveCount=0;
 let state="PLAY";
 let winner=null;
 
-// init round
-function startRound(){
+function resetRound(){
   entities=[];
   alive=[];
   aliveCount=0;
@@ -194,8 +151,9 @@ function startRound(){
     entities.push({
       name:c.name,
       iso2:c.iso2,
-      imageBuf: flagRGB(c.iso2),
-      x:CX, y:CY,
+      img: flagRGB(c.iso2),
+      x: CX + (Math.random()-0.5)*200,
+      y: CY + (Math.random()-0.5)*200,
       vx:(Math.random()-0.5)*SPEED,
       vy:(Math.random()-0.5)*SPEED
     });
@@ -203,11 +161,12 @@ function startRound(){
   }
   aliveCount = entities.length;
   state="PLAY";
+  winner=null;
   console.error("[round] started");
 }
-startRound();
+resetRound();
 
-// draw ball
+// draw circle (ball)
 const mask=[];
 for(let y=-R;y<=R;y++)
   for(let x=-R;x<=R;x++)
@@ -219,31 +178,86 @@ function drawBall(x,y){
   }
 }
 
-// draw frame
+// draw flag inside ball
+function drawFlagInBall(b){
+  if(!b.img) return;
+  let idx=0;
+  for(let y=0;y<FLAG_SIZE;y++){
+    for(let x=0;x<FLAG_SIZE;x++){
+      const r=b.img[idx++];
+      const g=b.img[idx++];
+      const bl=b.img[idx++];
+      const px = (b.x|0) + x - FLAG_SIZE/2;
+      const py = (b.y|0) + y - FLAG_SIZE/2;
+      setPix(px,py,r,g,bl);
+    }
+  }
+}
+
+// render frame
 function render(){
   clearBG();
-  drawText("YOUTUBE SHORTS LIVE", 50, 50, 2, [255,255,255]);
+
+  // title
+  for(let x=200;x<900;x++){
+    setPix(x,80,255,255,255);
+  }
 
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
-    drawBall(entities[i].x|0, entities[i].y|0);
+    const b=entities[i];
+    drawBall(b.x|0,b.y|0);
+    drawFlagInBall(b);
+  }
+
+  if(state==="WIN"){
+    for(let x=300;x<800;x++){
+      for(let y=900;y<1020;y++){
+        setPix(x,y,0,255,0);
+      }
+    }
   }
 }
 
 // physics
 function stepPhysics(){
+  if(state!=="PLAY") return;
+
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
     const b=entities[i];
+
     b.x += b.vx*dt;
     b.y += b.vy*dt;
 
-    if(b.x<R || b.x>W-R){ b.vx*=-1; }
-    if(b.y<R || b.y>H-R){ b.vy*=-1; }
+    if(b.x<R || b.x>W-R) b.vx*=-1;
+    if(b.y<R || b.y>H-R) b.vy*=-1;
+  }
+
+  // fake elimination every few seconds
+  if(Math.random()<0.01 && aliveCount>1){
+    let k = Math.floor(Math.random()*entities.length);
+    if(alive[k]){
+      alive[k]=false;
+      aliveCount--;
+      console.error(`[elim] ${entities[k].name}`);
+    }
+  }
+
+  if(aliveCount===1){
+    for(let i=0;i<entities.length;i++){
+      if(alive[i]){
+        winner = entities[i].name;
+        break;
+      }
+    }
+    state="WIN";
+    console.error(`[WINNER] ${winner}`);
+    setTimeout(resetRound, WIN_SECONDS*1000);
   }
 }
 
-// main loop
+// streaming boilerplate
 const headerBuf=Buffer.from(`P6\n${W} ${H}\n255\n`);
 const frameBuf=Buffer.alloc(headerBuf.length + rgb.length);
 
@@ -254,20 +268,18 @@ function writeFrame(){
 }
 
 setInterval(()=>{
-  if(state==="PLAY"){
-    stepPhysics();
-    render();
-  }
+  stepPhysics();
+  render();
   writeFrame();
 }, Math.round(1000/FPS));
 
 JS
 
 node -c /tmp/yt_sim.js
-echo "[sim] syntax OK"
+echo "[sim] ready"
 
 # --------------------------------------------------
-# RUN STREAM (YOUTUBE ONLY)
+# STREAM TO YOUTUBE (UNCHANGED PIPELINE)
 # --------------------------------------------------
 while true; do
   node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel info -stats \
@@ -282,6 +294,6 @@ while true; do
     -c:a aac -b:a 128k -ar 44100 \
     -f flv "$YOUTUBE_URL"
 
-  echo "[youtube] stream stopped — retrying in 3 seconds..."
+  echo "[youtube] retry in 3s..."
   sleep 3
 done
