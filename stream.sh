@@ -4,7 +4,6 @@ set -euo pipefail
 # =========================
 # 🔑 YOUR STREAM KEY
 # =========================
-# 1. Replaced with requested placeholder
 export YT_STREAM_KEY="u0d7-eetf-a97p-uer8-18ju"
 
 # =========================
@@ -14,7 +13,7 @@ export FPS=20
 export W=1080
 export H=1920
 
-# 2. Made balls 2.5x bigger (Original 10 -> 25)
+# Balls 2.5x bigger (Original 10 -> 25)
 export BALL_R=25
 export RING_R=200
 export HOLE_DEG=70
@@ -29,7 +28,6 @@ export RING_HOLE_EDGE=1
 
 # Flags
 export COUNTRIES_PATH="./countries.json"
-# Adjusted flag size to match new ball radius (radius 25 = diameter 50)
 export FLAG_SIZE=50
 export FLAGS_DIR="/tmp/flags"
 mkdir -p "$FLAGS_DIR"
@@ -38,7 +36,6 @@ YOUTUBE_URL="rtmps://a.rtmps.youtube.com/live2/${YT_STREAM_KEY}"
 
 echo "=== YOUTUBE SHORTS STREAM ==="
 echo "Resolution: ${W}x${H}  FPS=${FPS}"
-echo "URL: $YOUTUBE_URL"
 
 # --------------------------------------------------
 # Download flags
@@ -60,11 +57,13 @@ download_flag () {
     -f rawvideo -pix_fmt rgb24 "$out_rgb" >/dev/null 2>&1 || true
 }
 
+# Download both normal size and 3x win size
 echo "[flags] preparing..."
 ISO_LIST="$(grep -oE '"iso2"[[:space:]]*:[[:space:]]*"[^"]+"' "$COUNTRIES_PATH" | sed -E 's/.*"([a-zA-Z]{2})".*/\1/' | tr 'A-Z' 'a-z' | sort -u)"
 
 for iso in $ISO_LIST; do
   download_flag "$iso" "$FLAG_SIZE" || true
+  download_flag "$iso" "150" || true # 3x size for win screen
 done
 
 # --------------------------------------------------
@@ -84,14 +83,12 @@ const SPIN = +process.env.SPIN || 0.9;
 const SPEED = +process.env.SPEED || 100;
 const PHYS_MULT = +process.env.PHYS_MULT || 3;
 const WIN_SECONDS = +process.env.WIN_SCREEN_SECONDS || 6;
-const RESTART_SECONDS = +process.env.RESTART_SECONDS || 21000;
 const FLAG_SIZE = +process.env.FLAG_SIZE || 50;
 const FLAGS_DIR = process.env.FLAGS_DIR || "/tmp/flags";
 const COUNTRIES_PATH = process.env.COUNTRIES_PATH || "./countries.json";
 
 const CX = W * 0.5, CY = H * 0.5;
 const dt = PHYS_MULT / FPS;
-const startMs = Date.now();
 const rgb = Buffer.alloc(W * H * 3);
 
 function setPix(x,y,r,g,b){
@@ -100,7 +97,6 @@ function setPix(x,y,r,g,b){
   rgb[i]=r; rgb[i+1]=g; rgb[i+2]=b;
 }
 
-// Simple Font Logic
 const FONT={'A':[14,17,17,31,17,17,17],'E':[31,16,30,16,16,16,31],'I':[14,4,4,4,4,4,14],'L':[16,16,16,16,16,16,31],'N':[17,25,21,19,17,17,17],'O':[14,17,17,17,17,17,14],'R':[30,17,17,30,18,17,17],'S':[15,16,14,1,1,17,14],'T':[31,4,4,4,4,4,4],'V':[17,17,17,17,17,10,4],'W':[17,17,17,21,21,27,17],'0':[14,17,19,21,25,17,14],'1':[4,12,4,4,4,4,14],'2':[14,17,1,6,8,16,31],'3':[30,1,1,14,1,1,30],'4':[2,6,10,18,31,2,2],'5':[31,16,30,1,1,17,14],'6':[6,8,16,30,17,17,14],'7':[31,1,2,4,8,8,8],'8':[14,17,17,14,17,17,14],'9':[14,17,17,15,1,2,12],' ':[0,0,0,0,0,0,0],':':[0,4,0,0,4,0,0],'.':[0,0,0,0,0,0,4]};
 function drawText(text,x,y,scale,color){
   text=String(text).toUpperCase();
@@ -119,7 +115,6 @@ function drawText(text,x,y,scale,color){
 }
 function textWidth(text,scale){ return text.length*6*scale; }
 
-// Graphics
 function blitSprite(cx,cy,radius,spriteBuf,spriteSize){
   if(!spriteBuf) return;
   const x0=(cx-spriteSize/2)|0, y0=(cy-spriteSize/2)|0;
@@ -133,18 +128,11 @@ function blitSprite(cx,cy,radius,spriteBuf,spriteSize){
   }
 }
 
-function drawUI(aliveCount, total, lastWinner, holeCenterDeg){
+function drawUI(aliveCount, total, lastWinner){
   const s = 3; 
   const lineH = 7*s + 15;
-  // 2. Moved text ABOVE the circle and centered it
   const textY = (CY - RING_R - 180) | 0;
-
-  const labels = [
-    `ALIVE: ${aliveCount}/${total}`,
-    `LAST WIN: ${lastWinner}`,
-    `TYPE ME IN CHAT TO ENTER`
-  ];
-
+  const labels = [`ALIVE: ${aliveCount}/${total}`, `LAST WIN: ${lastWinner}`, `TYPE ME IN CHAT TO ENTER` ];
   labels.forEach((txt, i) => {
     const w = textWidth(txt, s);
     const x = (CX - w/2) | 0;
@@ -164,9 +152,8 @@ function drawRing(holeCenterDeg){
   }
 }
 
-// Game State
 let entities=[], alive=[], state="PLAY", t=0, winner=null, lastWinner="NONE";
-const countries=JSON.parse(fs.readFileSync(COUNTRIES_PATH,"utf8")).slice(0,50);
+const countries=JSON.parse(fs.readFileSync(COUNTRIES_PATH,"utf8"));
 
 function startRound(){
   entities = countries.map(c => ({
@@ -184,12 +171,11 @@ function startRound(){
 startRound();
 
 function tick(){
-  for(let i=0;i<rgb.length;i++) rgb[i]=15; // Clear BG
+  for(let i=0;i<rgb.length;i++) rgb[i]=15; 
   
   if(state==="PLAY"){
     t += dt;
     const holeDeg = (t*SPIN*180/Math.PI)%360;
-    
     entities.forEach((b, i) => {
       if(!alive[i]) return;
       b.x += b.vx*dt; b.y += b.vy*dt;
@@ -205,12 +191,10 @@ function tick(){
           b.x = CX + nx*(RING_R-R); b.y = CY + ny*(RING_R-R);
         }
       }
-      // Draw ball
       blitSprite(b.x|0, b.y|0, R, b.img, FLAG_SIZE);
     });
-
     drawRing(holeDeg);
-    drawUI(alive.filter(v=>v).length, entities.length, lastWinner, holeDeg);
+    drawUI(alive.filter(v=>v).length, entities.length, lastWinner);
     if(alive.filter(v=>v).length <= 1){
       winner = entities[alive.indexOf(true)];
       lastWinner = winner ? winner.name : "NONE";
@@ -218,36 +202,33 @@ function tick(){
     }
   } else {
     t += 1/FPS;
-    // 3. Make win screen ball 3x bigger (Original R * 3)
     const winR = R * 3;
-    const winFlagSize = FLAG_SIZE * 3;
-    
+    const winFlag = (() => { try{return fs.readFileSync(`${FLAGS_DIR}/${winner.iso2}_150.rgb`)}catch{return null}})();
     const winText = "WE HAVE A WINNER!";
-    drawText(winText, (CX-textWidth(winText,4)/2)|0, (CY-200)|0, 4, [255,255,255]);
-    
+    drawText(winText, (CX-textWidth(winText,4)/2)|0, (CY-300)|0, 4, [255,255,255]);
     if(winner) {
-       // Since the flag files are fixed size, we'll just draw the larger circle base
-       // For a truly 3x bigger flag, you'd need a separate download/resize step
-       for(let r=0; r<winR; r++){
-         const a_step = 1/r;
-         for(let a=0; a<Math.PI*2; a+=a_step) setPix(CX+Math.cos(a)*r, CY+Math.sin(a)*r, 255,215,0);
-       }
-       drawText(winner.name, (CX-textWidth(winner.name,3)/2)|0, (CY+winR+20)|0, 3, [255,255,255]);
+       blitSprite(CX|0, CY|0, winR, winFlag, 150);
+       drawText(winner.name, (CX-textWidth(winner.name,3)/2)|0, (CY+winR+40)|0, 3, [255,255,255]);
     }
     if(t > WIN_SECONDS) startRound();
   }
-  
   process.stdout.write(`P6\n${W} ${H}\n255\n`);
   process.stdout.write(rgb);
 }
-
 setInterval(tick, 1000/FPS);
 JS
 
-# Run Loop
+# --------------------------------------------------
+# RUN STREAM (FIXED FFmpeg Syntax for GitHub)
+# --------------------------------------------------
 while true; do
-  node /tmp/yt_sim.js | ffmpeg -y -f image2pipe -vcodec ppm -r "$FPS" -i - \
-    -f lavfi -i "anullsrc=cl=stereo:sr=44100" -c:v libx264 -preset ultrafast \
-    -pix_fmt yuv420p -f flv "$YOUTUBE_URL"
+  node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel info -y \
+    -f image2pipe -vcodec ppm -r "$FPS" -i - \
+    -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
+    -c:v libx264 -preset ultrafast -tune zerolatency \
+    -pix_fmt yuv420p -g $((FPS*2)) -b:v 2500k \
+    -c:a aac -b:a 128k \
+    -f flv "$YOUTUBE_URL"
+  echo "Stream stopped, retrying..."
   sleep 3
 done
