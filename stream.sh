@@ -15,8 +15,8 @@ set -euo pipefail
 : "${YT_VIDEO_ID:=}"      # optional alternative: provide video id (needs access token)
 
 export FPS="${FPS:-20}"
-export W="${W:-720}"
-export H="${H:-1280}"
+export W="${W:-710}"
+export H="${H:-1537}"
 export RESTART_SECONDS="${RESTART_SECONDS:-21000}"
 
 export BALL_R="${BALL_R:-10}"
