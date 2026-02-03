@@ -310,14 +310,49 @@ function drawRing(holeCenterDeg){
 }
 
 function drawUI(){
-  const s=2, y=12, lineH=7*s+10;
-  drawTextShadow(`ALIVE: ${aliveCount}/${entities.length}`, 14, y, s);
-  drawTextShadow(`LAST WIN: ${String(lastWinner).toUpperCase().slice(0,18)}`, 14, y+lineH, s);
+  const s = 2;
 
-  const elapsed = ((Date.now()-startMs)/1000)|0;
+  // Position UI to the LEFT of the ring
+  const padding = 24;
+  const textX = Math.max(
+    10,
+    (CX - RING_R - 220) | 0   // left of circle
+  );
+
+  // Vertically center UI relative to the circle
+  const lineH = 7*s + 10;
+  const baseY = (CY - lineH*1.5) | 0;
+
+  drawTextShadow(
+    `ALIVE: ${aliveCount}/${entities.length}`,
+    textX,
+    baseY,
+    s
+  );
+
+  drawTextShadow(
+    `LAST WIN: ${String(lastWinner).toUpperCase().slice(0,18)}`,
+    textX,
+    baseY + lineH,
+    s
+  );
+
+  const elapsed = ((Date.now() - startMs)/1000)|0;
   const left = Math.max(0, RESTART_SECONDS - elapsed);
-  drawTextShadow(fmtCountdown(left), 14, y+lineH*2, 2);
-  drawTextShadow("TYPE ME IN CHAT TO ENTER", 14, y+lineH*3, 2);
+
+  drawTextShadow(
+    fmtCountdown(left),
+    textX,
+    baseY + lineH*2,
+    s
+  );
+
+  drawTextShadow(
+    "TYPE ME IN CHAT TO ENTER",
+    textX,
+    baseY + lineH*3,
+    s
+  );
 }
 
 function renderPlay(holeCenterDeg){
