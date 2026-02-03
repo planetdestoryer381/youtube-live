@@ -4,46 +4,45 @@ set -euo pipefail
 # =========================
 # 🔑 YOUR STREAM KEY
 # =========================
-: "${YT_STREAM_KEY:?Missing YT_STREAM_KEY}"
 export YT_STREAM_KEY="u0d7-eetf-a97p-uer8-18ju"
 
 # =========================
 # 🎬 VERTICAL SHORTS SETTINGS
 # =========================
-export FPS="${FPS:-20}"
-export W="${W:-1080}"
-export H="${H:-1920}"
+export FPS=20
+export W=1080
+export H=1920
 
-# Game / physics
-export BALL_R="${BALL_R:-10}"
-export RING_R="${RING_R:-200}"
-export HOLE_DEG="${HOLE_DEG:-70}"
-export SPIN="${SPIN:-0.9}"
-export SPEED="${SPEED:-100}"
-export PHYS_MULT="${PHYS_MULT:-3}"
-export WIN_SCREEN_SECONDS="${WIN_SCREEN_SECONDS:-6}"
-export RESTART_SECONDS="${RESTART_SECONDS:-21000}"
+# Game / physics defaults (tweak later if you want)
+export BALL_R=10
+export RING_R=200
+export HOLE_DEG=70
+export SPIN=0.9
+export SPEED=100
+export PHYS_MULT=3
+export WIN_SCREEN_SECONDS=6
+export RESTART_SECONDS=21000
 
-export RING_THICKNESS="${RING_THICKNESS:-4}"
-export RING_HOLE_EDGE="${RING_HOLE_EDGE:-1}"
+export RING_THICKNESS=4
+export RING_HOLE_EDGE=1
 
 # Flags
-export COUNTRIES_PATH="${COUNTRIES_PATH:-./countries.json}"
-export FLAG_SIZE="${FLAG_SIZE:-26}"
-export FLAGS_DIR="${FLAGS_DIR:-/tmp/flags}"
+export COUNTRIES_PATH="./countries.json"
+export FLAG_SIZE=26
+export FLAGS_DIR="/tmp/flags"
 mkdir -p "$FLAGS_DIR"
 
 YOUTUBE_URL="rtmps://a.rtmps.youtube.com/live2/${YT_STREAM_KEY}"
 
-echo "=== YOUTUBE SHORTS STREAM (RING GAME) ==="
+echo "=== YOUTUBE SHORTS STREAM ==="
 echo "Resolution: ${W}x${H}  FPS=${FPS}"
 echo "URL: $YOUTUBE_URL"
 node -v
 ffmpeg -version | head -n 2
-echo "========================================="
+echo "============================"
 
 # --------------------------------------------------
-# Download flags (same as your working example)
+# Download flags (same as your original, kept)
 # --------------------------------------------------
 download_flag () {
   local iso="$1"
@@ -75,9 +74,9 @@ done
 echo "[flags] prepared (iso2 unique): $COUNT"
 
 # --------------------------------------------------
-# WRITE THE GAME ENGINE (YOUTUBE ONLY)
+# WRITE THE GAME ENGINE (CLEAN YOUTUBE ONLY)
 # --------------------------------------------------
-cat > /tmp/yt_ring_game.js <<'JS'
+cat > /tmp/yt_sim.js <<'JS'
 'use strict';
 const fs = require('fs');
 
@@ -92,11 +91,11 @@ const FPS = +process.env.FPS || 20;
 const W   = +process.env.W   || 1080;
 const H   = +process.env.H   || 1920;
 
-const R        = +process.env.BALL_R || 10;
-const RING_R   = +process.env.RING_R || 200;
-const HOLE_DEG = +process.env.HOLE_DEG || 70;
-const SPIN     = +process.env.SPIN || 0.9;
-const SPEED    = +process.env.SPEED || 100;
+const R         = +process.env.BALL_R || 10;
+const RING_R    = +process.env.RING_R || 200;
+const HOLE_DEG  = +process.env.HOLE_DEG || 70;
+const SPIN      = +process.env.SPIN || 0.9;
+const SPEED     = +process.env.SPEED || 100;
 const PHYS_MULT = +process.env.PHYS_MULT || 3;
 const WIN_SECONDS = +process.env.WIN_SCREEN_SECONDS || 6;
 const RESTART_SECONDS = +process.env.RESTART_SECONDS || 21000;
@@ -110,7 +109,7 @@ const FLAGS_DIR = process.env.FLAGS_DIR || "/tmp/flags";
 const FLAG_SIZE = +process.env.FLAG_SIZE || 26;
 
 const CX = W * 0.5, CY = H * 0.5;
-const dt = (PHYS_MULT) / FPS;
+const dt = PHYS_MULT / FPS;
 
 // framebuffer
 const rgb = Buffer.alloc(W * H * 3);
@@ -124,34 +123,19 @@ function fillSolid(r,g,b){
 }
 function clearBG(){ fillSolid(10,14,28); }
 
-// tiny font (same vibe as your original; expanded enough for UI)
+// tiny font (enough for UI)
 const FONT={
 'A':[0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
-'B':[0b11110,0b10001,0b11110,0b10001,0b10001,0b10001,0b11110],
-'C':[0b01110,0b10001,0b10000,0b10000,0b10000,0b10001,0b01110],
-'D':[0b11110,0b10001,0b10001,0b10001,0b10001,0b10001,0b11110],
 'E':[0b11111,0b10000,0b11110,0b10000,0b10000,0b10000,0b11111],
-'F':[0b11111,0b10000,0b11110,0b10000,0b10000,0b10000,0b10000],
-'G':[0b01110,0b10001,0b10000,0b10111,0b10001,0b10001,0b01110],
-'H':[0b10001,0b10001,0b11111,0b10001,0b10001,0b10001,0b10001],
 'I':[0b01110,0b00100,0b00100,0b00100,0b00100,0b00100,0b01110],
-'J':[0b00111,0b00010,0b00010,0b00010,0b10010,0b10010,0b01100],
-'K':[0b10001,0b10010,0b11100,0b10010,0b10001,0b10001,0b10001],
 'L':[0b10000,0b10000,0b10000,0b10000,0b10000,0b10000,0b11111],
-'M':[0b10001,0b11011,0b10101,0b10101,0b10001,0b10001,0b10001],
 'N':[0b10001,0b11001,0b10101,0b10011,0b10001,0b10001,0b10001],
 'O':[0b01110,0b10001,0b10001,0b10001,0b10001,0b10001,0b01110],
-'P':[0b11110,0b10001,0b10001,0b11110,0b10000,0b10000,0b10000],
-'Q':[0b01110,0b10001,0b10001,0b10001,0b10101,0b10010,0b01101],
 'R':[0b11110,0b10001,0b10001,0b11110,0b10010,0b10001,0b10001],
 'S':[0b01111,0b10000,0b01110,0b00001,0b00001,0b10001,0b01110],
 'T':[0b11111,0b00100,0b00100,0b00100,0b00100,0b00100,0b00100],
-'U':[0b10001,0b10001,0b10001,0b10001,0b10001,0b10001,0b01110],
 'V':[0b10001,0b10001,0b10001,0b10001,0b10001,0b01010,0b00100],
 'W':[0b10001,0b10001,0b10001,0b10101,0b10101,0b11011,0b10001],
-'X':[0b10001,0b01010,0b00100,0b00100,0b00100,0b01010,0b10001],
-'Y':[0b10001,0b01010,0b00100,0b00100,0b00100,0b00100,0b00100],
-'Z':[0b11111,0b00010,0b00100,0b01000,0b10000,0b10000,0b11111],
 '0':[0b01110,0b10001,0b10011,0b10101,0b11001,0b10001,0b01110],
 '1':[0b00100,0b01100,0b00100,0b00100,0b00100,0b00100,0b01110],
 '2':[0b01110,0b10001,0b00001,0b00110,0b01000,0b10000,0b11111],
@@ -190,13 +174,13 @@ function drawText(text,x,y,scale,color){
     cx += (5*scale + scale);
   }
 }
-function textWidth(text,scale){ return String(text).length*(5*scale+scale) - scale; }
+function textWidth(text,scale){ return String(text).length*(5*scale+scale)-scale; }
 function drawTextShadow(text,x,y,scale){
   drawText(text, x+1, y+1, scale, [0,0,0]);
   drawText(text, x, y, scale, [255,255,255]);
 }
 
-// sprites
+// flags
 function readRGB(path,size){
   try{
     const buf=fs.readFileSync(path);
@@ -207,16 +191,15 @@ function readRGB(path,size){
 function flagRGB(iso2){
   return readRGB(`${FLAGS_DIR}/${iso2}_${FLAG_SIZE}.rgb`, FLAG_SIZE);
 }
-function blitSpriteInCircle(centerX, centerY, radius, spriteBuf, spriteSize){
+function blitSpriteInCircle(cx, cy, radius, spriteBuf, spriteSize){
   if(!spriteBuf) return;
   const half=(spriteSize/2)|0;
-  const x0=(centerX-half)|0;
-  const y0=(centerY-half)|0;
+  const x0=(cx-half)|0, y0=(cy-half)|0;
   const r2=(radius-1)*(radius-1);
   for(let sy=0; sy<spriteSize; sy++){
     for(let sx=0; sx<spriteSize; sx++){
       const px=x0+sx, py=y0+sy;
-      const dx=px-centerX, dy=py-centerY;
+      const dx=px-cx, dy=py-cy;
       if(dx*dx+dy*dy>r2) continue;
       const si=(sy*spriteSize+sx)*3;
       setPix(px,py,spriteBuf[si],spriteBuf[si+1],spriteBuf[si+2]);
@@ -259,7 +242,7 @@ function loadCountries(){
   return out;
 }
 const COUNTRIES=loadCountries();
-console.error(`[countries] loaded ${COUNTRIES.length} unique countries from ${COUNTRIES_PATH}`);
+console.error(`[countries] loaded ${COUNTRIES.length}`);
 
 function fmtCountdown(sec){
   sec = Math.max(0, sec|0);
@@ -269,40 +252,41 @@ function fmtCountdown(sec){
   return `RESTART IN ${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 
-// game state
+// entities
 let entities=[], alive=[], aliveCount=0;
 let state="PLAY";
-let t=0;
-let winFrames=0;
-let winner=null;
-let lastWinner="none";
+let t=0, winFrames=0;
+let winner=null, lastWinner="none";
 
-// masks for ball
+// ball mask
 const mask=[];
 for(let y=-R;y<=R;y++) for(let x=-R;x<=R;x++) if(x*x+y*y<=R*R) mask.push([x,y]);
 
-function drawBallBase(cx,cy,col){
+function drawBallBase(cx,cy){
   const x0=cx|0, y0=cy|0;
-  const [r,g,b]=col;
-  for(const [dx,dy] of mask) setPix(x0+dx,y0+dy,r,g,b);
+  for(const [dx,dy] of mask) setPix(x0+dx,y0+dy,50,70,120);
 }
 function drawNameUnderBall(x,y,name){
   const label=String(name).toUpperCase().replace(/[^A-Z0-9_ .:-]/g,' ').trim().slice(0,16);
   const w=textWidth(label,1);
-  drawTextShadow(label, (x-w/2)|0, (y+R+6)|0, 1);
+  drawTextShadow(label,(x-w/2)|0,(y+R+6)|0,1);
+}
+function drawEntity(e){
+  const x=e.x|0, y=e.y|0;
+  drawBallBase(x,y);
+  if(e.imageBuf) blitSpriteInCircle(x,y,R,e.imageBuf,e.imageSize);
+  drawNameUnderBall(x,y,e.name);
 }
 
-// ring drawing (fast + clean)
 function drawRing(holeCenterDeg){
-  const thickness = Math.max(2, RING_THICKNESS);
-  const inner = RING_R - thickness;
-  const outer = RING_R + thickness;
+  const thick = Math.max(2, RING_THICKNESS);
+  const inner = RING_R - thick;
+  const outer = RING_R + thick;
 
   for(let deg=0; deg<360; deg+=0.35){
     if(inHole(deg, holeCenterDeg)) continue;
     const a = deg*Math.PI/180;
     const ca=Math.cos(a), sa=Math.sin(a);
-
     for(let rr=inner; rr<=outer; rr+=1){
       const x = (CX + ca*rr)|0;
       const y = (CY + sa*rr)|0;
@@ -325,73 +309,49 @@ function drawRing(holeCenterDeg){
   }
 }
 
-// UI
-function drawTopUI(){
-  const s = 2;
-  const y = 12;
-  const lineH = 7*s + 10;
+function drawUI(){
+  const s=2, y=12, lineH=7*s+10;
+  drawTextShadow(`ALIVE: ${aliveCount}/${entities.length}`, 14, y, s);
+  drawTextShadow(`LAST WIN: ${String(lastWinner).toUpperCase().slice(0,18)}`, 14, y+lineH, s);
 
-  const aliveTxt = `ALIVE: ${aliveCount}/${entities.length}`;
-  const lastTxt  = `LAST WIN: ${String(lastWinner).toUpperCase().slice(0,18)}`;
-  drawTextShadow(aliveTxt, 14, y, s);
-  drawTextShadow(lastTxt, 14, y + lineH, s);
-
-  const elapsed = ((Date.now() - startMs)/1000)|0;
+  const elapsed = ((Date.now()-startMs)/1000)|0;
   const left = Math.max(0, RESTART_SECONDS - elapsed);
-  drawTextShadow(fmtCountdown(left), 14, y + lineH*2, 2);
-  drawTextShadow("TYPE ME IN CHAT TO ENTER", 14, y + lineH*3, 2);
+  drawTextShadow(fmtCountdown(left), 14, y+lineH*2, 2);
+  drawTextShadow("TYPE ME IN CHAT TO ENTER", 14, y+lineH*3, 2);
 }
 
-// render
-function clearAndUI(){
-  clearBG();
-  drawTopUI();
-}
-function drawEntity(e){
-  const x=e.x|0, y=e.y|0;
-  drawBallBase(x,y,[50,70,120]);
-  if(e.imageBuf) blitSpriteInCircle(x,y,R,e.imageBuf,e.imageSize);
-  drawNameUnderBall(x,y,e.name);
-}
 function renderPlay(holeCenterDeg){
-  clearAndUI();
+  clearBG();
+  drawUI();
   drawRing(holeCenterDeg);
-  for(let i=0;i<entities.length;i++){
-    if(alive[i]) drawEntity(entities[i]);
-  }
+  for(let i=0;i<entities.length;i++) if(alive[i]) drawEntity(entities[i]);
 }
 function renderWin(){
   fillSolid(8,10,18);
-  const title = "WE HAVE A WINNER";
+  const title="WE HAVE A WINNER";
   drawTextShadow(title,(W/2-textWidth(title,4)/2)|0,(H/2-100)|0,4);
-
   if(winner){
-    const iconX = (W/2)|0;
-    const iconY = (H/2 - 10)|0;
-    drawBallBase(iconX, iconY, [50,70,120]);
+    const x=(W/2)|0, y=(H/2-10)|0;
+    drawBallBase(x,y);
     if(winner.iso2){
-      const buf = flagRGB(winner.iso2);
-      if(buf) blitSpriteInCircle(iconX, iconY, R, buf, FLAG_SIZE);
+      const buf=flagRGB(winner.iso2);
+      if(buf) blitSpriteInCircle(x,y,R,buf,FLAG_SIZE);
     }
-    const name = String(winner.name).toUpperCase().slice(0,20);
-    drawTextShadow(name, (W/2 - (textWidth(name,2)/2))|0, (H/2 + 40)|0, 2);
+    const name=String(winner.name).toUpperCase().slice(0,20);
+    drawTextShadow(name,(W/2-textWidth(name,2)/2)|0,(H/2+40)|0,2);
   }
 }
 
-// init round
 function startRound(){
-  entities=[];
-  alive=[];
-  aliveCount=0;
-
+  entities=[]; alive=[]; aliveCount=0;
   const innerR = Math.max(35, RING_R - R - 35);
 
   for(const c of COUNTRIES){
     const a=Math.random()*Math.PI*2;
     const rr=Math.random()*innerR;
     const dir=Math.random()*Math.PI*2;
+
     entities.push({
-      type:"country",
       name:c.name,
       iso2:c.iso2,
       imageBuf: flagRGB(c.iso2),
@@ -405,11 +365,11 @@ function startRound(){
     aliveCount++;
   }
 
-  winner=null;
   state="PLAY";
   t=0;
   winFrames=0;
-  console.error(`[round] new round started (entities=${entities.length})`);
+  winner=null;
+  console.error(`[round] start (${entities.length} entities)`);
 }
 startRound();
 
@@ -431,8 +391,7 @@ function stepPhysics(){
   }
 
   // collisions
-  const minD = 2*R;
-  const minD2 = minD*minD;
+  const minD = 2*R, minD2=minD*minD;
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
     const A=entities[i];
@@ -463,7 +422,7 @@ function stepPhysics(){
     if(!alive[i]) continue;
     const b=entities[i];
     const dx=b.x-CX, dy=b.y-CY;
-    const dist=Math.sqrt(dx*dx+dy*dy) || 0.0001;
+    const dist=Math.sqrt(dx*dx+dy*dy)||0.0001;
     const angDeg=(Math.atan2(dy,dx)*180/Math.PI+360)%360;
 
     if(dist>wallR){
@@ -474,14 +433,12 @@ function stepPhysics(){
       const nx=dx/dist, ny=dy/dist;
       b.x = CX + nx*wallR;
       b.y = CY + ny*wallR;
-
       const vn=b.vx*nx + b.vy*ny;
       b.vx -= 2*vn*nx;
       b.vy -= 2*vn*ny;
     }
   }
 
-  // normalize speed
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
     normalizeSpeed(entities[i], SPEED);
@@ -492,12 +449,11 @@ function stepPhysics(){
 
 function tick(){
   if(state==="PLAY"){
-    const holeCenterDeg = stepPhysics();
-
+    const holeCenterDeg=stepPhysics();
     if(aliveCount<=1){
       const wi=getWinnerIndex();
       const e=wi>=0?entities[wi]:null;
-      winner = e ? { name: e.name, iso2: e.iso2 || null } : null;
+      winner = e ? {name:e.name, iso2:e.iso2} : null;
       lastWinner = winner ? winner.name : "none";
       state="WIN";
       winFrames=0;
@@ -508,9 +464,7 @@ function tick(){
   }else{
     winFrames++;
     renderWin();
-    if(winFrames >= WIN_SECONDS*FPS){
-      startRound();
-    }
+    if(winFrames >= WIN_SECONDS*FPS) startRound();
   }
 }
 
@@ -529,16 +483,17 @@ drawTextShadow("BOOTING...", (W/2 - 70)|0, (H/2)|0, 3);
 writeFrame();
 
 setInterval(()=>{ tick(); writeFrame(); }, Math.round(1000/FPS));
+
 JS
 
-node -c /tmp/yt_ring_game.js
+node -c /tmp/yt_sim.js
 echo "[sim] syntax OK"
 
 # --------------------------------------------------
-# RUN STREAM (YOUTUBE ONLY) - SAME AS YOUR WORKING EXAMPLE
+# RUN STREAM (YOUTUBE ONLY)
 # --------------------------------------------------
 while true; do
-  node /tmp/yt_ring_game.js | ffmpeg -hide_banner -loglevel info -stats \
+  node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel info -stats \
     -thread_queue_size 1024 \
     -f image2pipe -vcodec ppm -r "$FPS" -i - \
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
