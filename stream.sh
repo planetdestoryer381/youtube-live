@@ -5,6 +5,7 @@ set -euo pipefail
 # 🔑 CONFIG
 # =========================
 export YT_STREAM_KEY="u0d7-eetf-a97p-uer8-18ju"
+# Using the standard RTMP endpoint for better "Handshake" compatibility
 YOUTUBE_URL="rtmp://a.rtmp.youtube.com/live2/${YT_STREAM_KEY}"
 
 export FPS=30
@@ -17,7 +18,7 @@ export RING_R=380
 export FLAGS_DIR="/tmp/flags"
 mkdir -p "$FLAGS_DIR"
 
-# --- Load All Countries ---
+# --- Load All Countries (193+) ---
 download_flag () {
   local iso="$1"
   local size="$2"
@@ -28,14 +29,14 @@ download_flag () {
   ffmpeg -loglevel error -y -i "$png" -vf "scale=${size}:${size}" -f rawvideo -pix_fmt rgb24 "$out_rgb" >/dev/null 2>&1 || true
 }
 
-echo "--- Loading All 193+ Countries ---"
+echo "--- Loading All Countries ---"
 ISO_LIST="$(grep -oE '"iso2"[[:space:]]*:[[:space:]]*"[^"]+"' "./countries.json" | sed -E 's/.*"([a-zA-Z]{2})".*/\1/' | tr 'A-Z' 'a-z' | sort -u)"
 for iso in $ISO_LIST; do
   download_flag "$iso" "50"
   download_flag "$iso" "150"
 done
 
-# --- Node.js Engine: Optimized for Stability ---
+# --- Node.js Engine: Hardened for YouTube ---
 cat > /tmp/yt_sim.js <<'JS'
 const fs = require('fs');
 const W=1080, H=1920, FPS=30, R=25, RING_R=380, DT=1/30;
@@ -75,7 +76,7 @@ const countries=JSON.parse(fs.readFileSync("./countries.json","utf8"));
 function init(){
   ents=countries.map(c=>({
     n:c.name, i:c.iso2.toLowerCase(), 
-    x:CX+(Math.random()-0.5)*400, y:CY+(Math.random()-0.5)*400,
+    x:CX+(Math.random()-0.5)*300, y:CY+(Math.random()-0.5)*300,
     vx:(Math.random()-0.5)*600, vy:(Math.random()-0.5)*600, a:true
   }));
   state="PLAY";
@@ -88,7 +89,7 @@ function loop(){
   if(state==="PLAY"){
     let alive=ents.filter(e=>e.a);
     drawT(`ALIVE: ${alive.length}`, 100, 150, 4, [255,255,255]);
-    drawT("TYPE ME TO JOIN!", 220, 1800, 3, [255,200,0]);
+    drawT("TYPE TO JOIN", 320, 1800, 3, [255,200,0]);
 
     for(let a=0;a<360;a+=0.5){
       let diff=Math.abs(((a-hDeg+180)%360)-180);
@@ -97,29 +98,21 @@ function loop(){
       for(let t=0;t<10;t++) setP(CX+(RING_R+t)*Math.cos(r),CY+(RING_R+t)*Math.sin(r),255,255,255);
     }
 
-    // Physics Step
     for(let i=0; i<ents.length; i++){
       let e = ents[i]; if(!e.a) continue;
-      
       for(let j=i+1; j<ents.length; j++){
         let b = ents[j]; if(!b.a) continue;
         let dx=b.x-e.x, dy=b.y-e.y, d=Math.sqrt(dx*dx+dy*dy);
         if(d < R*2 && d > 0){
-          let nx=dx/d, ny=dy/d;
-          // Anti-Stick: Move them apart so they don't overlap next frame
-          let overlap = (R*2 - d) + 1; 
+          let nx=dx/d, ny=dy/d, overlap = (R*2 - d) + 1.5; 
           e.x -= nx * (overlap/2); e.y -= ny * (overlap/2);
           b.x += nx * (overlap/2); b.y += ny * (overlap/2);
-          // Collision Bounce
           let p = (e.vx*nx + e.vy*ny - (b.vx*nx + b.vy*ny));
-          e.vx -= p*nx; e.vy -= p*ny;
-          b.vx += p*nx; b.vy += p*ny;
+          e.vx -= p*nx; e.vy -= p*ny; b.vx += p*nx; b.vy += p*ny;
         }
       }
-
       e.x+=e.vx*DT; e.y+=e.vy*DT;
       let dx=e.x-CX, dy=e.y-CY, dist=Math.sqrt(dx*dx+dy*dy);
-      
       if(dist > RING_R-R){
         const ang=(Math.atan2(dy,dx)*180/Math.PI+360)%360;
         if(Math.abs(((ang-hDeg+180)%360)-180) < 35) e.a=false;
@@ -139,25 +132,25 @@ function loop(){
     if(++timer > 150) init();
   }
   
-  // Final Safety Check for FFmpeg
-  try {
-    process.stdout.write(`P6\n${W} ${H}\n255\n`);
-    process.stdout.write(rgb);
-  } catch (err) { process.exit(0); }
+  // Write raw frame (no P6 header to avoid FFmpeg sync issues)
+  process.stdout.write(rgb);
 }
 init();
 setInterval(loop, 1000/FPS);
 JS
 
-# --- STABLE RESTART LOOP ---
+# --- THE "FORCE START" FFmpeg COMMAND ---
 while true; do
-  node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel error -y \
-    -f image2pipe -vcodec ppm -r "$FPS" -i - \
+  # Using -f rawvideo instead of ppm to bypass header parsing
+  node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel info -y \
+    -f rawvideo -pixel_format rgb24 -video_size 1080x1920 -framerate "$FPS" -i - \
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
     -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
-    -x264-params "keyint=60:min-keyint=60:scenecut=0" \
-    -b:v 3000k -maxrate 3000k -bufsize 6000k \
-    -c:a aac -b:a 128k -f flv "$YOUTUBE_URL"
-  echo "FFmpeg crashed or closed. Restarting..."
-  sleep 2
+    -force_key_frames "expr:gte(t,n_forced*2)" \
+    -b:v 3500k -maxrate 3500k -bufsize 7000k \
+    -c:a aac -b:a 128k -ar 44100 \
+    -f flv "$YOUTUBE_URL"
+  
+  echo "Stream dropped. Restarting in 3 seconds..."
+  sleep 3
 done
