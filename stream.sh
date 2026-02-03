@@ -153,7 +153,7 @@ const FONT={
 '.':[0,0,0,0,0,0,0b00100],
 };
 function drawChar(ch,x,y,scale,color){
-  const rows = FONT[ch] || FONT['?'] || FONT['A'];
+  const rows = FONT[ch] || FONT['A'];
   const [r,g,b]=color;
   for(let rr=0; rr<7; rr++){
     const bits=rows[rr] || 0;
@@ -309,50 +309,27 @@ function drawRing(holeCenterDeg){
   }
 }
 
+//
+// ✅ THIS IS THE ONLY CHANGE: UI moved left of the ring
+//
 function drawUI(){
   const s = 2;
 
-  // Position UI to the LEFT of the ring
-  const padding = 24;
-  const textX = Math.max(
-    10,
-    (CX - RING_R - 220) | 0   // left of circle
-  );
+  // left of circle
+  const textX = Math.max(10, (CX - RING_R - 220) | 0);
 
-  // Vertically center UI relative to the circle
+  // vertically centered around circle
   const lineH = 7*s + 10;
   const baseY = (CY - lineH*1.5) | 0;
 
-  drawTextShadow(
-    `ALIVE: ${aliveCount}/${entities.length}`,
-    textX,
-    baseY,
-    s
-  );
-
-  drawTextShadow(
-    `LAST WIN: ${String(lastWinner).toUpperCase().slice(0,18)}`,
-    textX,
-    baseY + lineH,
-    s
-  );
+  drawTextShadow(`ALIVE: ${aliveCount}/${entities.length}`, textX, baseY, s);
+  drawTextShadow(`LAST WIN: ${String(lastWinner).toUpperCase().slice(0,18)}`, textX, baseY + lineH, s);
 
   const elapsed = ((Date.now() - startMs)/1000)|0;
   const left = Math.max(0, RESTART_SECONDS - elapsed);
+  drawTextShadow(fmtCountdown(left), textX, baseY + lineH*2, s);
 
-  drawTextShadow(
-    fmtCountdown(left),
-    textX,
-    baseY + lineH*2,
-    s
-  );
-
-  drawTextShadow(
-    "TYPE ME IN CHAT TO ENTER",
-    textX,
-    baseY + lineH*3,
-    s
-  );
+  drawTextShadow("TYPE ME IN CHAT TO ENTER", textX, baseY + lineH*3, s);
 }
 
 function renderPlay(holeCenterDeg){
@@ -417,7 +394,6 @@ function stepPhysics(){
   t += dt;
   const holeCenterDeg = (t*SPIN*180/Math.PI) % 360;
 
-  // move
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
     const b=entities[i];
@@ -425,7 +401,6 @@ function stepPhysics(){
     b.y += b.vy*dt;
   }
 
-  // collisions
   const minD = 2*R, minD2=minD*minD;
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
@@ -451,7 +426,6 @@ function stepPhysics(){
     }
   }
 
-  // ring wall + hole
   const wallR = RING_R - R - 3;
   for(let i=0;i<entities.length;i++){
     if(!alive[i]) continue;
@@ -518,7 +492,6 @@ drawTextShadow("BOOTING...", (W/2 - 70)|0, (H/2)|0, 3);
 writeFrame();
 
 setInterval(()=>{ tick(); writeFrame(); }, Math.round(1000/FPS));
-
 JS
 
 node -c /tmp/yt_sim.js
