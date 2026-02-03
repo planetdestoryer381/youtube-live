@@ -13,18 +13,28 @@ export H=1920
 export FLAGS_DIR="/tmp/flags"
 mkdir -p "$FLAGS_DIR"
 
-# --- Pre-Render Assets ---
+# --- High-Speed Asset Loader with Timeout ---
 download_flag () {
   local iso=$(echo "$1" | tr 'A-Z' 'a-z')
   local png="$FLAGS_DIR/${iso}.png"
+  # If the render exists, skip
   [ -s "$FLAGS_DIR/${iso}_70.rgb" ] && return 0
-  curl -fsSL "https://flagcdn.com/w160/${iso}.png" -o "$png" || return 0
-  ffmpeg -loglevel error -y -i "$png" -vf "scale=70:70" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_70.rgb" >/dev/null 2>&1 || true
-  ffmpeg -loglevel error -y -i "$png" -vf "scale=50:50" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_50.rgb" >/dev/null 2>&1 || true
-  ffmpeg -loglevel error -y -i "$png" -vf "scale=240:240" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_240.rgb" >/dev/null 2>&1 || true
+  
+  # Fetch with a 5-second timeout so it doesn't get stuck forever
+  if curl -m 5 -fsSL "https://flagcdn.com/w160/${iso}.png" -o "$png"; then
+    ffmpeg -loglevel error -y -i "$png" -vf "scale=70:70" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_70.rgb" || true
+    ffmpeg -loglevel error -y -i "$png" -vf "scale=50:50" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_50.rgb" || true
+    ffmpeg -loglevel error -y -i "$png" -vf "scale=40:40" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_40.rgb" || true
+    ffmpeg -loglevel error -y -i "$png" -vf "scale=240:240" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_240.rgb" || true
+    rm -f "$png" # Save space
+  else
+    echo "Skipping $iso - download failed"
+  fi
 }
 
-ISO_LIST=$(grep -oE '"iso2"[[:space:]]*:[[:space:]]*"[^"]+"' "./countries.json" | cut -d'"' -f4 | tr 'A-Z' 'a-z' | sort -u)
+echo "--- Loading Assets (Fast Mode) ---"
+# Only grab a subset initially to get the stream live faster
+ISO_LIST=$(grep -oE '"iso2"[[:space:]]*:[[:space:]]*"[^"]+"' "./countries.json" | head -n 50 | cut -d'"' -f4 | tr 'A-Z' 'a-z')
 for iso in $ISO_LIST; do download_flag "$iso"; done
 
 # --- Node.js Engine ---
@@ -34,7 +44,8 @@ const W=1080, H=1920, FPS=60, R=35, RING_R=420, DT=1/60;
 const CX=W/2, CY=H/2, FLAGS_DIR="/tmp/flags";
 const rgb = Buffer.alloc(W * H * 3);
 
-const FONT={'A':[14,17,17,31,17,17,17],'B':[30,17,30,17,17,17,30],'C':[14,17,16,16,16,17,14],'D':[30,17,17,17,17,17,30],'E':[31,16,30,16,16,16,31],'F':[31,16,30,16,16,16,16],'G':[14,17,16,23,17,17,14],'H':[17,17,17,31,17,17,17],'I':[14,4,4,4,4,4,14],'J':[7,2,2,2,2,18,12],'K':[17,18,20,24,20,18,17],'L':[16,16,16,16,16,16,31],'M':[17,27,21,17,17,17,17],'N':[17,25,21,19,17,17,17],'O':[14,17,17,17,17,17,14],'P':[30,17,17,30,16,16,16],'Q':[14,17,17,17,21,18,13],'R':[30,17,17,30,18,17,17],'S':[15,16,14,1,1,17,14],'T':[31,4,4,4,4,4,4],'U':[17,17,17,17,17,17,14],'V':[17,17,17,17,17,10,4],'W':[17,17,17,21,21,27,17],'X':[17,17,10,4,10,17,17],'Y':[17,17,10,4,4,4,4],'Z':[31,1,2,4,8,16,31],'0':[14,17,19,21,25,17,14],'1':[4,12,4,4,4,4,14],'2':[14,17,1,6,8,16,31],'3':[30,1,1,14,1,1,30],'4':[2,6,10,18,31,2,2],'5':[31,16,30,1,1,17,14],'6':[6,8,16,30,17,17,14],'7':[31,1,2,4,8,8,8],'8':[14,17,17,14,17,17,14],'9':[14,17,17,15,1,2,12],' ':[0,0,0,0,0,0,0],'!':[4,4,4,4,0,0,4],'=':[0,0,31,0,31,0,0],':':[0,0,4,0,4,0,0]};
+// Fast text drawing
+const FONT={'A':[14,17,17,31,17,17,17],'B':[30,17,30,17,17,17,30],'C':[14,17,16,16,16,17,14],'D':[30,17,17,17,17,17,30],'E':[31,16,30,16,16,16,31],'F':[31,16,30,16,16,16,16],'G':[14,17,16,23,17,17,14],'H':[17,17,17,31,17,17,17],'I':[14,4,4,4,4,4,14],'J':[7,2,2,2,2,18,12],'K':[17,18,20,24,20,18,17],'L':[16,16,16,16,16,16,31],'M':[17,27,21,17,17,17,17],'N':[17,25,21,19,17,17,17],'O':[14,17,17,17,17,17,14],'P':[30,17,17,30,16,16,16],'Q':[14,17,17,17,21,18,13],'R':[30,17,17,30,18,17,17],'S':[15,16,14,1,1,17,14],'T':[31,4,4,4,4,4,4],'U':[17,17,17,17,17,17,14],'V':[17,17,17,17,17,10,4],'W':[17,17,17,21,21,27,17],'X':[17,17,10,4,10,17,17],'Y':[17,17,10,4,4,4,4],'Z':[31,1,2,4,8,16,31],'0':[14,17,19,21,25,17,14],'1':[4,12,4,4,4,4,14],'2':[14,17,1,6,8,16,31],'3':[30,1,1,14,1,1,30],'4':[2,6,10,18,31,2,2],'5':[31,16,30,1,1,17,14],'6':[6,8,16,30,17,17,14],'7':[31,1,2,4,8,8,8],'8':[14,17,17,14,17,17,14],'9':[14,17,17,15,1,2,12],' ':[0,0,0,0,0,0,0],'!':[4,4,4,4,0,0,4],'=':[0,0,31,0,31,0,0],':':[0,0,4,0,4,0,0],'.':[0,0,0,0,0,0,4]};
 function drawT(t,x,y,s,c){
   let cx=x; for(let char of (t||"").toString().toUpperCase()){
     const rows=FONT[char]||FONT[' '];
@@ -68,7 +79,7 @@ function init(){
 }
 
 function drawUI(){
-  // Top Row (Dark Grey Slots)
+  // Top Row Background
   for(let i=0;i<3;i++) {
     const c = (i===0)? [25,25,30] : [40,40,45];
     for(let y=60;y<180;y++) for(let x=40+i*340;x<340+i*340;x++){
@@ -81,10 +92,9 @@ function drawUI(){
   drawT("LAST ONE WINS", 400, 110, 2, [255,255,255]);
   drawT("!67 = BAN", 760, 105, 4, [255, 50, 50]);
 
-  // Win Leaderboard (Top Left below Bar)
+  // Win Leaderboard
   drawT("WIN LEADERBOARD", 40, 210, 2, [255,255,255]);
-  const sorted = Object.entries(winStats).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  sorted.forEach(([name, count], i) => {
+  Object.entries(winStats).sort((a,b)=>b[1]-a[1]).slice(0,5).forEach(([name, count], i) => {
     drawT(`${i+1}. ${name.substring(0,10)}: ${count}`, 40, 250 + i*35, 2, [255,255,200]);
   });
 
@@ -92,7 +102,6 @@ function drawUI(){
   for(let y=1500;y<1850;y++) for(let x=0;x<W;x++){
     const idx=(y*W+x)*3; rgb[idx]=15; rgb[idx+1]=15; rgb[idx+2]=20;
   }
-  // Draw current "Dead" balls in the grid
   deadStack.forEach((e, idx) => {
     const col=idx%12, row=Math.floor(idx/12);
     blit(80+col*85, 1560+row*90, 22, e.i, 50);
@@ -100,25 +109,25 @@ function drawUI(){
 }
 
 function loop(){
-  // Background
+  // Main Background
   for(let i=0;i<rgb.length;i+=3){ rgb[i]=158; rgb[i+1]=100; rgb[i+2]=75; }
   const hDeg=(Date.now()/1000*1.1*60)%360;
   drawUI();
   
   if(state==="PLAY"){
-    // Thicker Ring (2x)
+    // 2x Thicker Ring
     for(let a=0;a<360;a+=0.3){
       let diff=Math.abs(((a-hDeg+180)%360)-180);
       if(diff<25)continue;
       const r=a*Math.PI/180;
-      for(let t=-10;t<10;t++){ // Thickened from -4,4 to -10,10
+      for(let t=-10;t<10;t++){
         const px=Math.floor(CX+(RING_R+t)*Math.cos(r)), py=Math.floor(CY+(RING_R+t)*Math.sin(r));
         if(px>=0&&px<W&&py>=0&&py<H){ const idx=(py*W+px)*3; rgb[idx]=255; rgb[idx+1]=255; rgb[idx+2]=255; }
       }
     }
 
     ents.forEach((e, i) => {
-      if(e.f){ // Smooth Death Animation to Grid Slot
+      if(e.f){ 
         const targetIdx = deadStack.indexOf(e);
         const tx = 80 + (targetIdx%12)*85, ty = 1560 + Math.floor(targetIdx/12)*90;
         e.x += (tx - e.x) * 0.1; e.y += (ty - e.y) * 0.1;
@@ -127,7 +136,6 @@ function loop(){
       }
       if(!e.a) return;
 
-      // Collisions & Walls
       for(let j=i+1;j<ents.length;j++){
         let b=ents[j]; if(!b.a || b.f) continue;
         let dx=b.x-e.x, dy=b.y-e.y, d=Math.sqrt(dx*dx+dy*dy);
@@ -143,7 +151,7 @@ function loop(){
       if(dist > RING_R-R){
         const ang=(Math.atan2(dy,dx)*180/Math.PI+360)%360;
         if(Math.abs(((ang-hDeg+180)%360)-180) < 25){
-          e.f=true; deadStack.push(e); // Ball "dies" and moves to stack
+          e.f=true; deadStack.push(e);
         } else {
           let nx=dx/dist, ny=dy/dist, dot=e.vx*nx+e.vy*ny;
           e.vx=(e.vx-2*dot*nx)*1.02; e.vy=(e.vy-2*dot*ny)*1.02;
@@ -159,7 +167,7 @@ function loop(){
       winStats[winner.n] = (winStats[winner.n]||0) + 1;
     }
   } else {
-    // Win Card Replica
+    // Round Summary
     for(let y=400;y<1300;y++) for(let x=100;x<980;x++){
       const idx=(y*W+x)*3; rgb[idx]=30; rgb[idx+1]=45; rgb[idx+2]=95;
     }
@@ -174,7 +182,7 @@ init();
 setInterval(loop, 1000/FPS);
 JS
 
-# --- Stable 60FPS Stream ---
+# --- Start Stream Immediately ---
 while true; do
   node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel error -y \
     -f rawvideo -pixel_format rgb24 -video_size 1080x1920 -framerate 60 -i - \
