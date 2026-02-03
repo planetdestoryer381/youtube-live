@@ -13,39 +13,33 @@ export H=1920
 export FLAGS_DIR="/tmp/flags"
 mkdir -p "$FLAGS_DIR"
 
-# --- Fixed Asset Loader with Retries ---
+# --- Asset Loader (Big Flags) ---
 download_flag () {
   local iso=$(echo "$1" | tr 'A-Z' 'a-z')
-  # Skip if already exists and isn't empty
-  [ -s "$FLAGS_DIR/${iso}_70.rgb" ] && return 0
-  
+  [ -s "$FLAGS_DIR/${iso}_90.rgb" ] && return 0
   local png="$FLAGS_DIR/${iso}.png"
-  # Increased timeout to 10s and added 3 retries for stability
   if curl --retry 3 --retry-delay 2 -m 10 -fsSL "https://flagcdn.com/w160/${iso}.png" -o "$png"; then
-    ffmpeg -loglevel error -y -i "$png" -vf "scale=70:70" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_70.rgb" || true
+    ffmpeg -loglevel error -y -i "$png" -vf "scale=90:90" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_90.rgb" || true
     ffmpeg -loglevel error -y -i "$png" -vf "scale=42:42" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_42.rgb" || true
     ffmpeg -loglevel error -y -i "$png" -vf "scale=240:240" -f rawvideo -pix_fmt rgb24 "$FLAGS_DIR/${iso}_240.rgb" || true
     rm -f "$png"
-  else
-    echo "Warning: Could not download flag for $iso"
   fi
 }
 export -f download_flag
 
-echo "--- Syncing 193 Flags (With Retries) ---"
-# Reduced parallel jobs to 5 to avoid triggering CDN rate limits/timeouts
+echo "--- Syncing Big Flags ---"
 grep -oP '"iso2":\s*"\K[^"]+' countries.json | xargs -P 5 -I {} bash -c 'download_flag "{}"'
 
-# --- Node.js Graphics & Physics Engine ---
+# --- Node.js Graphics Engine ---
 cat > /tmp/yt_sim.js <<'JS'
 const fs = require('fs');
 const W=1080, H=1920, FPS=60, DT=1/60;
-const R=18, RING_R=240; 
-const CX=W/2, CY=500;   
+const R=36, RING_R=380; // 2x Bigger Balls
+const CX=W/2, CY=650;   // Lowered slightly to fit the leaderboard
 const FLAGS_DIR="/tmp/flags";
 const rgb = Buffer.alloc(W * H * 3);
 
-const FONT={'A':[14,17,17,31,17,17,17],'B':[30,17,30,17,17,17,30],'C':[14,17,16,16,16,17,14],'D':[30,17,17,17,17,17,30],'E':[31,16,30,16,16,16,31],'F':[31,16,30,16,16,16,16],'G':[14,17,16,23,17,17,14],'H':[17,17,17,31,17,17,17],'I':[14,4,4,4,4,4,14],'J':[7,2,2,2,2,18,12],'K':[17,18,20,24,20,18,17],'L':[16,16,16,16,16,16,31],'M':[17,27,21,17,17,17,17],'N':[17,25,21,19,17,17,17],'O':[14,17,17,17,17,17,14],'P':[30,17,17,30,16,16,16],'Q':[14,17,17,17,21,18,13],'R':[30,17,17,30,18,17,17],'S':[15,16,14,1,1,17,14],'T':[31,4,4,4,4,4,4],'U':[17,17,17,17,17,17,14],'V':[17,17,17,17,17,10,4],'W':[17,17,17,21,21,27,17],'X':[17,17,10,4,10,17,17],'Y':[17,17,10,4,4,4,4],'Z':[31,1,2,4,8,16,31],'0':[14,17,19,21,25,17,14],'1':[4,12,4,4,4,4,14],'2':[14,17,1,6,8,16,31],'3':[30,1,1,14,1,1,30],'4':[2,6,10,18,31,2,2],'5':[31,16,30,1,1,17,14],'6':[6,8,16,30,17,17,14],'7':[31,1,2,4,8,8,8],'8':[14,17,17,14,17,17,14],'9':[14,17,17,15,1,2,12],' ':[0,0,0,0,0,0,0],'!':[4,4,4,4,0,0,4],':':[0,0,4,0,4,0,0],'.':[0,0,0,0,0,0,4]};
+const FONT={'A':[14,17,17,31,17,17,17],'B':[30,17,30,17,17,17,30],'C':[14,17,16,16,16,17,14],'D':[30,17,17,17,17,17,30],'E':[31,16,30,16,16,16,31],'F':[31,16,30,16,16,16,16],'G':[14,17,16,23,17,17,14],'H':[17,17,17,31,17,17,17],'I':[14,4,4,4,4,4,14],'J':[7,2,2,2,2,18,12],'K':[17,18,20,24,20,18,17],'L':[16,16,16,16,16,16,31],'M':[17,27,21,17,17,17,17],'N':[17,25,21,19,17,17,17],'O':[14,17,17,17,17,17,14],'P':[30,17,17,30,16,16,16],'Q':[14,17,17,17,21,18,13],'R':[30,17,17,30,18,17,17],'S':[15,16,14,1,1,17,14],'T':[31,4,4,4,4,4,4],'U':[17,17,17,17,17,17,14],'V':[17,17,17,17,17,10,4],'W':[17,17,17,21,21,27,17],'X':[17,17,10,4,10,17,17],'Y':[17,17,10,4,4,4,4],'Z':[31,1,2,4,8,16,31],'0':[14,17,19,21,25,17,14],'1':[4,12,4,4,4,4,14],'2':[14,17,1,6,8,16,31],'3':[30,1,1,14,1,1,30],'4':[2,6,10,18,31,2,2],'5':[31,16,30,1,1,17,14],'6':[6,8,16,30,17,17,14],'7':[31,1,2,4,8,8,8],'8':[14,17,17,14,17,17,14],'9':[14,17,17,15,1,2,12],' ':[0,0,0,0,0,0,0],'!':[4,4,4,4,0,0,4],':':[0,0,4,0,4,0,0],'.':[0,0,0,0,0,0,4],'=':[0,0,31,0,31,0,0]};
 function drawT(t,x,y,s,c){
   let cx=x; for(let char of (t||"").toString().toUpperCase()){
     const rows=FONT[char]||FONT[' '];
@@ -57,17 +51,18 @@ function drawT(t,x,y,s,c){
   }
 }
 
-const flagCache = {};
-function blit(cx,cy,rad,iso,sz){
+function blit(cx,cy,rad,iso,sz,full=true){
   const k=`${iso}_${sz}`; if(!flagCache[k]) try{flagCache[k]=fs.readFileSync(`${FLAGS_DIR}/${iso}_${sz}.rgb`)}catch(e){return};
   const b=flagCache[k], x0=Math.floor(cx-sz/2), y0=Math.floor(cy-sz/2);
   for(let y=0;y<sz;y++) for(let x=0;x<sz;x++){
-    if((x-sz/2)**2+(y-sz/2)**2 > rad**2) continue;
+    if(full){ if((x-sz/2)**2+(y-sz/2)**2 > (sz/2)**2) continue; }
+    else { if((x-sz/2)**2+(y-sz/2)**2 > rad**2) continue; }
     const si=(y*sz+x)*3, di=((y0+y)*W+(x0+x))*3;
     if(di>=0 && di<rgb.length-3){ rgb[di]=b[si]; rgb[di+1]=b[si+1]; rgb[di+2]=b[si+2]; }
   }
 }
 
+const flagCache = {};
 let ents=[], deadStack=[], winStats={}, state="PLAY", timer=0, lastWin="NONE";
 const countries = JSON.parse(fs.readFileSync('countries.json', 'utf8'));
 
@@ -79,24 +74,35 @@ function init(){
 }
 
 function drawUI(){
-  for(let i=0;i<3;i++) {
-    const c = [35,35,40];
-    for(let y=40;y<140;y++) for(let x=40+i*340;x<340+i*340;x++){
-      const idx=(y*W+x)*3; rgb[idx]=c[0]; rgb[idx+1]=c[1]; rgb[idx+2]=c[2];
-    }
+  // Connected Top Bar
+  const barC = [25, 25, 30];
+  for(let y=40;y<160;y++) for(let x=40;x<W-40;x++){
+    const idx=(y*W+x)*3; rgb[idx]=barC[0]; rgb[idx+1]=barC[1]; rgb[idx+2]=barC[2];
   }
-  drawT("LAST WINNER", 60, 60, 1, [150,150,150]);
-  drawT(lastWin.substring(0,12), 60, 85, 2, [255,255,255]);
-  drawT("ALIVE", 400, 60, 1, [150,150,150]);
-  drawT(ents.filter(e=>!e.f).length.toString(), 400, 85, 2, [255,255,255]);
-  drawT("!67 = BAN", 760, 75, 4, [255, 60, 60]);
+  drawT("LAST WINNER", 80, 65, 1, [150,150,150]);
+  drawT(lastWin.substring(0,15), 80, 95, 2, [255,255,255]);
+  drawT("ALIVE", 480, 65, 1, [150,150,150]);
+  drawT(ents.filter(e=>!e.f).length.toString(), 480, 95, 2, [255,255,255]);
+  drawT("!67 = BAN", 780, 85, 4, [255, 60, 60]);
 
-  for(let y=1000;y<1920;y++) for(let x=0;x<W;x++){
-    const idx=(y*W+x)*3; rgb[idx]=12; rgb[idx+1]=12; rgb[idx+2]=15;
+  // Leaderboard Area
+  for(let y=170;y<380;y++) for(let x=40;x<W-40;x++){
+    const idx=(y*W+x)*3; rgb[idx]=15; rgb[idx+1]=15; rgb[idx+2]=20;
+  }
+  drawT("SESSION LEADERBOARD", 60, 190, 2, [255,255,100]);
+  const leaders = Object.entries(winStats).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  leaders.forEach(([name, wins], i) => {
+    drawT(`${i+1}. ${name.substring(0,18)}`, 60, 235 + i*28, 1, [200,200,200]);
+    drawT(wins.toString(), 950, 235 + i*28, 1, [255,255,255]);
+  });
+
+  // Bottom Death Grid
+  for(let y=1150;y<1920;y++) for(let x=0;x<W;x++){
+    const idx=(y*W+x)*3; rgb[idx]=10; rgb[idx+1]=10; rgb[idx+1]=12;
   }
   deadStack.forEach((e, idx) => {
     const col=idx%11, row=Math.floor(idx/11);
-    blit(95+col*88, 1060+row*48, 18, e.i, 42); 
+    blit(95+col*88, 1200+row*48, 18, e.i, 42, false); 
   });
 }
 
@@ -106,6 +112,7 @@ function loop(){
   drawUI();
   
   if(state==="PLAY"){
+    // Arena
     for(let a=0;a<360;a+=0.4){
       let diff=Math.abs(((a-hDeg+180)%360)-180);
       if(diff<22) continue; 
@@ -119,12 +126,12 @@ function loop(){
     ents.forEach((e, i) => {
       if(e.f){ 
         const targetIdx = deadStack.indexOf(e);
-        const tx = 95 + (targetIdx%11)*88, ty = 1060 + Math.floor(targetIdx/11)*48;
+        const tx = 95 + (targetIdx%11)*88, ty = 1200 + Math.floor(targetIdx/11)*48;
         e.x += (tx - e.x) * 0.12; e.y += (ty - e.y) * 0.12;
-        blit(e.x, e.y, 18, e.i, 42);
+        blit(e.x, e.y, 18, e.i, 42, false);
         return;
       }
-
+      // Physics
       for(let j=i+1;j<ents.length;j++){
         let b=ents[j]; if(b.f) continue;
         let dx=b.x-e.x, dy=b.y-e.y, d=Math.sqrt(dx*dx+dy*dy);
@@ -135,7 +142,6 @@ function loop(){
           e.vx-=p*nx; e.vy-=p*ny; b.vx+=p*nx; b.vy+=p*ny;
         }
       }
-
       e.x+=e.vx*DT; e.y+=e.vy*DT;
       let dx=e.x-CX, dy=e.y-CY, dist=Math.sqrt(dx*dx+dy*dy);
       if(dist > RING_R-R){
@@ -148,7 +154,7 @@ function loop(){
           e.x=CX+nx*(RING_R-R); e.y=CY+ny*(RING_R-R);
         }
       }
-      blit(e.x, e.y, R, e.i, 70);
+      blit(e.x, e.y, R, e.i, 90, true); 
     });
 
     let alive=ents.filter(e=>!e.f);
@@ -157,12 +163,13 @@ function loop(){
       winStats[winner.n] = (winStats[winner.n]||0) + 1;
     }
   } else {
-    for(let y=300;y<800;y++) for(let x=150;x<930;x++){
+    // Win Card
+    for(let y=450;y<950;y++) for(let x=150;x<930;x++){
       const idx=(y*W+x)*3; rgb[idx]=25; rgb[idx+1]=35; rgb[idx+2]=80;
     }
-    drawT("WINNER!", 430, 350, 6, [255,255,255]);
-    blit(W/2, 580, 100, winner.i, 240);
-    drawT(winner.n, 350, 720, 3, [255,255,255]);
+    drawT("WINNER!", 430, 500, 6, [255,255,255]);
+    blit(W/2, 730, 100, winner.i, 240, true);
+    drawT(winner.n, 350, 870, 3, [255,255,255]);
     if(++timer > 360) init();
   }
   process.stdout.write(rgb);
