@@ -4,7 +4,6 @@ set -euo pipefail
 # =========================
 # 🔑 STREAM CONFIG
 # =========================
-# Using your requested placeholder
 export YT_STREAM_KEY="u0d7-eetf-a97p-uer8-18ju"
 
 # YouTube Shorts Dimensions
@@ -13,14 +12,13 @@ export W=1080
 export H=1920
 
 # Physics & Sizes
-export BALL_R=25          # 2.5x bigger
-export RING_R=350         # Scaled up for 1080p
+export BALL_R=25          
+export RING_R=350         
 export HOLE_DEG=70
 export SPIN=0.9
 export SPEED=120
 export PHYS_MULT=3
 export WIN_SCREEN_SECONDS=6
-export RESTART_SECONDS=21000
 
 # Flags
 export COUNTRIES_PATH="./countries.json"
@@ -69,7 +67,6 @@ const W = 1080, H = 1920, FPS = 20;
 const R = 25, RING_R = 350, HOLE_DEG = 70;
 const SPIN = 0.9, SPEED = 120, DT = 3/20;
 const CX = W/2, CY = H/2;
-
 const FLAGS_DIR = "/tmp/flags";
 const rgb = Buffer.alloc(W * H * 3);
 
@@ -79,7 +76,7 @@ function setPix(x, y, r, g, b) {
     rgb[i] = r; rgb[i+1] = g; rgb[i+2] = b;
 }
 
-const FONT={'A':[14,17,17,31,17,17,17],'E':[31,16,30,16,16,16,31],'I':[14,4,4,4,4,4,14],'L':[16,16,16,16,16,16,31],'N':[17,25,21,19,17,17,17],'O':[14,17,17,17,17,17,14],'R':[30,17,17,30,18,17,17],'S':[15,16,14,1,1,17,14],'T':[31,4,4,4,4,4,4],'V':[17,17,17,17,17,10,4],'W':[17,17,17,21,21,27,17],'0':[14,17,19,21,25,17,14],'1':[4,12,4,4,4,4,14],'2':[14,17,1,6,8,16,31],'3':[30,1,1,14,1,1,30],'4':[2,6,10,18,31,2,2],'5':[31,16,30,1,1,17,14],'6':[6,8,16,30,17,17,14],'7':[31,1,2,4,8,8,8],'8':[14,17,17,14,17,17,14],'9':[14,17,17,15,1,2,12],' ':[0,0,0,0,0,0,0],':':[0,4,0,0,4,0,0],'/':[0,2,4,8,16,0,0]};
+const FONT={'A':[14,17,17,31,17,17,17],'E':[31,16,30,16,16,16,31],'I':[14,4,4,4,4,4,14],'L':[16,16,16,16,16,16,31],'N':[17,25,21,19,17,17,17],'O':[14,17,17,17,17,17,14],'R':[30,17,17,30,18,17,17],'S':[15,16,14,1,1,17,14],'T':[31,4,4,4,4,4,4],'V':[17,17,17,17,17,10,4],'W':[17,17,17,21,21,27,17],'0':[14,17,19,21,25,17,14],'1':[4,12,4,4,4,4,14],'2':[14,17,1,6,8,16,31],'3':[30,1,1,14,1,1,30],'4':[2,6,10,18,31,2,2],'5':[31,16,30,1,1,17,14],'6':[6,8,16,30,17,17,14],'7':[31,1,2,4,8,8,8],'8':[14,17,17,14,17,17,14],'9':[14,17,17,15,1,2,12],' ':[0,0,0,0,0,0,0],':':[0,4,0,0,4,0,0]};
 
 function drawText(text, x, y, scale, color) {
     let curX = x;
@@ -91,6 +88,7 @@ function drawText(text, x, y, scale, color) {
                     for (let sy = 0; sy < scale; sy++)
                         for (let sx = 0; sx < scale; sx++)
                             setPix(curX + c * scale + sx, y + r * scale + sy, ...color);
+                }
             }
         }
         curX += 6 * scale;
@@ -112,8 +110,8 @@ function blitFlag(cx, cy, radius, iso, size) {
     } catch(e) {}
 }
 
-let entities = [], lastWinner = "NONE", state = "PLAY", timer = 0;
-const countries = JSON.parse(fs.readFileSync("./countries.json", "utf8")).slice(0, 40);
+let entities = [], lastWinner = "NONE", winnerIso = "un", state = "PLAY", timer = 0;
+const countries = JSON.parse(fs.readFileSync("./countries.json", "utf8")).slice(0, 45);
 
 function init() {
     entities = countries.map(c => ({
@@ -125,24 +123,23 @@ function init() {
 }
 
 function loop() {
-    rgb.fill(20); // Dark background
+    rgb.fill(15); 
     const holeDeg = (Date.now()/1000 * SPIN * 60) % 360;
 
     if (state === "PLAY") {
         let aliveList = entities.filter(e => e.alive);
-        // Draw UI Above Circle
-        drawText(`ALIVE: ${aliveList.length}/${entities.length}`, CX - 150, CY - RING_R - 120, 3, [255,255,255]);
-        drawText(`LAST WINNER: ${lastWinner}`, CX - 200, CY - RING_R - 70, 2, [200,200,200]);
+        drawText(`ALIVE: ${aliveList.length}/${entities.length}`, CX - 180, CY - RING_R - 120, 3, [255,255,255]);
+        drawText(`LAST WINNER: ${lastWinner}`, CX - 180, CY - RING_R - 70, 2, [180,180,180]);
 
-        // Draw Ring
         for (let a = 0; a < 360; a += 0.5) {
             let diff = Math.abs(((a - holeDeg + 180) % 360) - 180);
             if (diff < HOLE_DEG/2) continue;
             const rad = a * Math.PI / 180;
-            for(let th=0; th<5; th++) setPix(CX+(RING_R+th)*Math.cos(rad), CY+(RING_R+th)*Math.sin(rad), 255, 255, 255);
+            for(let th=0; th<6; th++) setPix(CX+(RING_R+th)*Math.cos(rad), CY+(RING_R+th)*Math.sin(rad), 240, 240, 240);
         }
 
-        aliveList.forEach(e => {
+        entities.forEach(e => {
+            if (!e.alive) return;
             e.x += e.vx * DT; e.y += e.vy * DT;
             const dx = e.x - CX, dy = e.y - CY, dist = Math.sqrt(dx*dx + dy*dy);
             if (dist > RING_R - R) {
@@ -165,17 +162,16 @@ function loop() {
             state = "WIN"; timer = 0;
         }
     } else {
-        drawText("WE HAVE A WINNER", CX - 250, CY - 250, 4, [255, 255, 0]);
-        drawText(lastWinner, CX - (lastWinner.length*15), CY + 180, 5, [255, 255, 255]);
-        blitFlag(CX, CY, 75, winnerIso, 150); // 3x bigger ball
-        if (++timer > WIN_SECONDS * FPS) init();
+        drawText("WINNER", CX - 100, CY - 280, 5, [255, 255, 0]);
+        drawText(lastWinner, CX - (lastWinner.length*12), CY + 180, 4, [255, 255, 255]);
+        blitFlag(CX, CY, 75, winnerIso, 150); 
+        if (++timer > 6 * FPS) init();
     }
 
     process.stdout.write(`P6\n${W} ${H}\n255\n`);
     process.stdout.write(rgb);
 }
 
-const WIN_SECONDS = 6;
 init();
 setInterval(loop, 1000/FPS);
 JS
@@ -187,11 +183,12 @@ while true; do
   node /tmp/yt_sim.js | ffmpeg -hide_banner -loglevel info -y \
     -f image2pipe -vcodec ppm -r "$FPS" -i - \
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
-    -c:v libx264 -preset ultrafast -tune zerolatency \
-    -pix_fmt yuv420p -g $((FPS*2)) -b:v 3500k \
+    -map 0:v -map 1:a \
+    -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p \
+    -g $((FPS*2)) -b:v 3000k -maxrate 3000k -bufsize 6000k \
     -c:a aac -b:a 128k -ar 44100 \
     -f flv "$YOUTUBE_URL"
   
-  echo "Stream crashed or finished. Restarting in 5s..."
+  echo "Stream crashed. Restarting..."
   sleep 5
 done
