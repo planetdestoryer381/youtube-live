@@ -1,44 +1,64 @@
-name: Mysterium Node Test
+name: Mysterium Node Status Update
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:        # manual trigger
+  schedule:
+    - cron: '*/5 * * * *'  # automatic every 5 minutes
 
 jobs:
-  run-node:
+  run-node-status:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Update system
-        run: sudo apt update
+      # Step 1: Checkout the repo
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Start Docker
-        run: sudo systemctl start docker
-
-      - name: Get Public IP
+      # Step 2: Update system & install Docker + curl
+      - name: Install Docker and curl
         run: |
-          echo "Public IP:"
-          curl -s ifconfig.me
+          sudo apt update
+          sudo apt install -y docker.io curl
+          sudo systemctl start docker
 
-      - name: Pull and Run Mysterium Node
+      # Step 3: Ensure Mysterium Node is running
+      - name: Run Mysterium Node (if not running)
         run: |
-          # Pull the correct image
-          docker pull mysteriumnetwork/myst:latest
-
-          # Run node in detached mode
-          docker run -d \
-            --cap-add NET_ADMIN \
+          docker ps | grep myst-node || docker run -d \
             --name myst-node \
             --restart unless-stopped \
             -p 4449:4449 \
             -v myst-data:/var/lib/mysterium-node \
-            mysteriumnetwork/myst:latest \
-            service --agreed-terms-and-conditions
+            mysterium/myst-node:latest
 
-      - name: Show running containers
-        run: docker ps
+      # Step 4: Get public IP
+      - name: Get public IP
+        id: ip
+        run: |
+          IP=$(curl -s ifconfig.me)
+          echo "IP=$IP" >> $GITHUB_ENV
 
-      - name: Show logs (tail)
-        run: docker logs myst-node --tail 50
+      # Step 5: Get last 20 lines of node logs
+      - name: Fetch last logs
+        id: logs
+        run: |
+          LOGS=$(docker logs myst-node --tail 20 2>/dev/null | sed 's/"/\\"/g' | tr '\n' '\\n')
+          echo "LOGS=$LOGS" >> $GITHUB_ENV
 
-      - name: Keep runner alive (6 hours max)
-        run: sleep 21600
+      # Step 6: Write status.json
+      - name: Write status.json
+        run: |
+          echo "{
+            \"ip\": \"$IP\",
+            \"status\": \"running\",
+            \"logs\": \"$LOGS\"
+          }" > status.json
+
+      # Step 7: Commit & push status.json
+      - name: Commit and push
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add status.json
+          git commit -m "Update node status" || echo "No changes to commit"
+          git push
