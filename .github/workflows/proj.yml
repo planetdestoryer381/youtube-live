@@ -1,21 +1,22 @@
 name: Internet Speed Test
 
 on:
-  workflow_dispatch: # manual run
-  schedule:
-    - cron: "0 * * * *" # runs every hour (optional)
+  workflow_dispatch:
 
 jobs:
   speedtest:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq curl
+
       - name: Install Speedtest CLI
         run: |
-          sudo apt-get update
-          sudo apt-get install -y curl
-          curl -s https://install.speedtest.net/app/cli/install.deb.sh | sudo bash
-          sudo apt-get install -y speedtest
+          curl -L -o speedtest.tgz https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz
+          tar -xzf speedtest.tgz
+          chmod +x speedtest
+          sudo mv speedtest /usr/local/bin/
 
       - name: Run Speedtest
         run: |
