@@ -1,59 +1,43 @@
-name: Mysterium Node Monitor
+name: Public IP Test with Sleep
 
 on:
   workflow_dispatch:
 
 jobs:
-  run-node:
+  show-ip:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout the repo
-      - uses: actions/checkout@v3
-
-      # Update system & install docker safely
-      - name: Update system and install Docker
+      - name: Print Runner Info
         run: |
-          sudo apt update
-          sudo apt install -y docker.io curl
-          sudo systemctl start docker
+          echo "===== RUNNER INFO ====="
+          hostname
+          uname -a
 
-      # Pull & run Mysterium Node (if not already running)
-      - name: Run Mysterium Node
-        run: |
-          if ! docker ps | grep myst-node; then
-            docker run -d \
-              --name myst-node \
-              --restart unless-stopped \
-              -p 4449:4449 \
-              -v myst-data:/var/lib/mysterium-node \
-              mysteriumnetwork/mysterium-node:latest
-          fi
-
-      # Wait a few seconds for node to start
-      - name: Wait for node
-        run: sleep 10
-
-      # Get public IP
       - name: Get Public IP
-        run: echo "IP=$(curl -s ifconfig.me)" >> $GITHUB_ENV
-
-      # Grab last 50 logs
-      - name: Grab node logs
         run: |
-          LOGS=$(docker logs myst-node --tail 50)
-          echo "LOGS=$LOGS" >> $GITHUB_ENV
+          echo "Public IP of runner:"
+          curl -s ifconfig.me
 
-      # Create status.json
-      - name: Create status.json
+      - name: Disable Firewall
         run: |
-          echo "{\"ip\":\"${IP}\",\"status\":\"running\",\"logs\":\"${LOGS}\"}" > status.json
+          echo "Disabling UFW firewall..."
+          sudo ufw disable || echo "UFW not installed"
+          sudo systemctl stop firewalld || echo "firewalld not installed"
+          sudo iptables -F
+          sudo iptables -X
+          sudo iptables -t nat -F
+          sudo iptables -t nat -X
+          sudo iptables -t mangle -F
+          sudo iptables -t mangle -X
+          echo "All firewall rules flushed"
 
-      # Commit & push status.json back to GitHub
-      - name: Commit & push status.json
+      - name: Display Test Page Content
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add status.json
-          git commit -m "Update node status" || echo "No changes to commit"
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} HEAD:main
+          echo "<h1>TEST SITE</h1><p>This is running on public IP: $(curl -s ifconfig.me)</p>" > test.html
+          cat test.html
+
+      - name: Keep Runner Alive (6 hours max)
+        run: |
+          echo "Sleeping to keep runner alive..."
+          sleep 21600
