@@ -11,10 +11,8 @@ jobs:
       - name: Update system
         run: sudo apt update
 
-      - name: Install Docker + curl
-        run: |
-          sudo apt install -y docker.io curl
-          sudo systemctl start docker
+      - name: Ensure Docker is running
+        run: sudo systemctl start docker
 
       - name: Get Public IP
         run: |
@@ -33,7 +31,7 @@ jobs:
       - name: Show running containers
         run: docker ps
 
-      - name: Show logs (live)
+      - name: Show logs
         run: docker logs mysterium-node --tail 50
 
       - name: Keep runner alive (6 hours max)
