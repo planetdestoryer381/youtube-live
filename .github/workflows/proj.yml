@@ -3,18 +3,18 @@ name: Mysterium Node Status Update
 on:
   workflow_dispatch:        # manual trigger
   schedule:
-    - cron: '*/5 * * * *'  # automatic every 5 minutes (optional)
+    - cron: '*/10 * * * *'  # optional: runs every 10 minutes
 
 jobs:
   update-node-status:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout repository
+      # 1️⃣ Checkout repository
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      # Step 2: Install Docker safely + curl
+      # 2️⃣ Install Docker safely
       - name: Install Docker and curl
         run: |
           sudo apt update
@@ -23,31 +23,31 @@ jobs:
           sh get-docker.sh
           sudo systemctl start docker
 
-      # Step 3: Ensure Mysterium Node is running
-      - name: Run Mysterium Node if not running
+      # 3️⃣ Run Mysterium Node if not running
+      - name: Run Mysterium Node
         run: |
           docker ps | grep myst-node || docker run -d \
             --name myst-node \
             --restart unless-stopped \
             -p 4449:4449 \
             -v myst-data:/var/lib/mysterium-node \
-            mysterium/myst-node:latest
+            mysteriumnetwork/mysterium-node:latest
 
-      # Step 4: Get public IP
+      # 4️⃣ Get public IP
       - name: Get public IP
         id: get-ip
         run: |
           IP=$(curl -s ifconfig.me)
           echo "IP=$IP" >> $GITHUB_ENV
 
-      # Step 5: Fetch last 20 lines of node logs
+      # 5️⃣ Fetch last 20 lines of node logs
       - name: Fetch node logs
         id: get-logs
         run: |
           LOGS=$(docker logs myst-node --tail 20 2>/dev/null | sed 's/"/\\"/g' | tr '\n' '\\n')
           echo "LOGS=$LOGS" >> $GITHUB_ENV
 
-      # Step 6: Write status.json
+      # 6️⃣ Write status.json
       - name: Write status.json
         run: |
           echo "{
@@ -56,7 +56,7 @@ jobs:
             \"logs\": \"$LOGS\"
           }" > status.json
 
-      # Step 7: Commit & push status.json
+      # 7️⃣ Commit & push status.json to repo
       - name: Commit and push
         run: |
           git config --global user.name "github-actions[bot]"
