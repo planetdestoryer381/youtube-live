@@ -1,1 +1,40 @@
-hi
+name: Internet Speed Test
+
+on:
+  workflow_dispatch: # manual run
+  schedule:
+    - cron: "0 * * * *" # runs every hour (optional)
+
+jobs:
+  speedtest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install Speedtest CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl
+          curl -s https://install.speedtest.net/app/cli/install.deb.sh | sudo bash
+          sudo apt-get install -y speedtest
+
+      - name: Run Speedtest
+        run: |
+          speedtest --accept-license --accept-gdpr --format=json > result.json
+          cat result.json
+
+      - name: Pretty Output
+        run: |
+          DOWNLOAD=$(jq '.download.bandwidth' result.json)
+          UPLOAD=$(jq '.upload.bandwidth' result.json)
+          PING=$(jq '.ping.latency' result.json)
+          ISP=$(jq -r '.isp' result.json)
+          IP=$(jq -r '.interface.externalIp' result.json)
+          SERVER=$(jq -r '.server.name' result.json)
+          LOCATION=$(jq -r '.server.location' result.json)
+
+          echo "ISP: $ISP"
+          echo "IP: $IP"
+          echo "Server: $SERVER ($LOCATION)"
+          echo "Ping: $PING ms"
+          echo "Download: $(($DOWNLOAD * 8 / 1000000)) Mbps"
+          echo "Upload: $(($UPLOAD * 8 / 1000000)) Mbps"
