@@ -11,7 +11,7 @@ jobs:
       - name: Update system
         run: sudo apt update
 
-      - name: Ensure Docker is running
+      - name: Start Docker
         run: sudo systemctl start docker
 
       - name: Get Public IP
@@ -19,20 +19,26 @@ jobs:
           echo "Public IP:"
           curl -s ifconfig.me
 
-      - name: Run Mysterium Node (auto-restart)
+      - name: Pull and Run Mysterium Node
         run: |
+          # Pull the correct image
+          docker pull mysteriumnetwork/myst:latest
+
+          # Run node in detached mode
           docker run -d \
-            --name mysterium-node \
+            --cap-add NET_ADMIN \
+            --name myst-node \
             --restart unless-stopped \
             -p 4449:4449 \
             -v myst-data:/var/lib/mysterium-node \
-            mysterium/mysterium-node:latest
+            mysteriumnetwork/myst:latest \
+            service --agreed-terms-and-conditions
 
       - name: Show running containers
         run: docker ps
 
-      - name: Show logs
-        run: docker logs mysterium-node --tail 50
+      - name: Show logs (tail)
+        run: docker logs myst-node --tail 50
 
       - name: Keep runner alive (6 hours max)
         run: sleep 21600
