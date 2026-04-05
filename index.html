@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Node Panel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body style="background:#111;color:#0f0;font-family:monospace;">
+  <h1>📡 Node Status</h1>
+  <pre id="data">Loading...</pre>
+
+  <script>
+    async function load() {
+      const res = await fetch("status.json?cache=" + Date.now());
+      const data = await res.json();
+      document.getElementById("data").innerText =
+        JSON.stringify(data, null, 2);
+    }
+
+    load();
+    setInterval(load, 5000);
+  </script>
+</body>
+</html>
