@@ -1,41 +1,40 @@
-name: Internet Speed Test
+name: Mysterium Node Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  speedtest:
+  run-node:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq curl
+      - name: Update system
+        run: sudo apt update
 
-      - name: Install Speedtest CLI
+      - name: Install Docker + curl
         run: |
-          curl -L -o speedtest.tgz https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz
-          tar -xzf speedtest.tgz
-          chmod +x speedtest
-          sudo mv speedtest /usr/local/bin/
+          sudo apt install -y docker.io curl
+          sudo systemctl start docker
 
-      - name: Run Speedtest
+      - name: Get Public IP
         run: |
-          speedtest --accept-license --accept-gdpr --format=json > result.json
-          cat result.json
+          echo "Public IP:"
+          curl -s ifconfig.me
 
-      - name: Pretty Output
+      - name: Run Mysterium Node (auto-restart)
         run: |
-          DOWNLOAD=$(jq '.download.bandwidth' result.json)
-          UPLOAD=$(jq '.upload.bandwidth' result.json)
-          PING=$(jq '.ping.latency' result.json)
-          ISP=$(jq -r '.isp' result.json)
-          IP=$(jq -r '.interface.externalIp' result.json)
-          SERVER=$(jq -r '.server.name' result.json)
-          LOCATION=$(jq -r '.server.location' result.json)
+          docker run -d \
+            --name mysterium-node \
+            --restart unless-stopped \
+            -p 4449:4449 \
+            -v myst-data:/var/lib/mysterium-node \
+            mysterium/mysterium-node:latest
 
-          echo "ISP: $ISP"
-          echo "IP: $IP"
-          echo "Server: $SERVER ($LOCATION)"
-          echo "Ping: $PING ms"
-          echo "Download: $(($DOWNLOAD * 8 / 1000000)) Mbps"
-          echo "Upload: $(($UPLOAD * 8 / 1000000)) Mbps"
+      - name: Show running containers
+        run: docker ps
+
+      - name: Show logs (live)
+        run: docker logs mysterium-node --tail 50
+
+      - name: Keep runner alive (6 hours max)
+        run: sleep 21600
